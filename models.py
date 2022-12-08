@@ -1,6 +1,5 @@
 import math
 import torch
-import torch as th
 from torch import nn as nn
 from torch.nn import functional as F
 from timm.models.vision_transformer import DropPath, Mlp, Attention
@@ -13,7 +12,7 @@ class ShallowNN(nn.Module):
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
         self.fc1 = nn.Linear(in_features, hidden_features)
-        self.act1 = nn.GELU
+        self.act1 = nn.GELU()
         self.fc2 = nn.Linear(hidden_features, out_features)
         self.act2 = act_layer()
         self.drop = nn.Dropout(drop)
@@ -44,17 +43,18 @@ class FeatureFusion(nn.Module):
 class TransformerFusion(nn.Module):
     def __init__(self, video_dimension, audio_dimension, fused_dimension):
         super().__init__()
-        self.fused_dimension = fused_dimension
-        self.audio = FusionBlock(audio_dimension, 1, fused_dimension)
-        self.video = FusionBlock(video_dimension, 1, fused_dimension)
-        self.fused = FusionBlock(fused_dimension, 1, fused_dimension)
-        self.fc = ShallowNN(fused_dimension*2, fused_dimension, out_features=1)
+        self.audio = FusionBlock(audio_dimension, 1, mlp_ratio=1)
+        self.video = FusionBlock(video_dimension, 1, mlp_ratio=1)
+        #self.fused = FusionBlock(fused_dimension, 1)
+        self.fc = ShallowNN(161, hidden_features=128, out_features=1)
     
     def forward(self, feature_audio, feature_video, mask):
         feature_audio = self.audio(feature_audio, mask)
         feature_video = self.video(feature_video, mask)
-        x = torch.cat((feature_audio, feature_video), dim=2)
-        x = self.fused(x, mask)
+        feature_audio, feature_video, mask = feature_audio.sum(dim=1), feature_video.sum(dim=1), mask.sum(dim=1)
+        feature_audio = torch.div(feature_audio, mask.unsqueeze(1))
+        feature_video = torch.div(feature_video, mask.unsqueeze(1))
+        x = torch.cat((feature_audio, feature_video), dim=1)
         x = self.fc(x).squeeze(-1)
 
         return x
