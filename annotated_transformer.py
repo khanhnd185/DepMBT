@@ -118,15 +118,18 @@ class PositionwiseFeedForward(nn.Module):
         return self.w_2(self.dropout(F.relu(self.w_1(x))))
 
 def test():
-    N = 1
-    h = 1
-    d_ff = 2048
+    num_heads = 1
+    num_layers = 1
+    dim_ff = 2048
     dropout = 0
-    d_model = 161
+    dim_feature = 161
 
-    encoder = Encoder(EncoderLayer(d_model, h, d_ff, dropout), N)
+    batch_size = 2
+    sequence_leng = 100
 
-    x = torch.rand(2, 100, 256)
+    encoder = Encoder(EncoderLayer(dim_feature, num_heads, dim_ff, dropout), num_layers)
+
+    x = torch.rand(batch_size, sequence_leng, dim_feature)
     y = encoder(x)
     print(y.shape)
     
