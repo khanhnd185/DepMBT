@@ -11,8 +11,7 @@ def collate_fn(data):
     audio, video, labels, lengths = zip(*data)
     labels = torch.tensor(labels).long()
     lengths = torch.tensor(lengths).long()
-    N = max(lengths)
-    mask = torch.arange(N)[None, :] < lengths[:, None]
+    mask = torch.arange(max(lengths))[None, :] < lengths[:, None]
 
     feature_audio = [torch.tensor(a).long() for a in audio]
     feature_video = [torch.tensor(v).long() for v in video]

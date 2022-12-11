@@ -81,7 +81,7 @@ class MultiHeadedAttention(nn.Module):
     def forward(self, query, key, value, mask=None):
         if mask is not None:
             # Same mask applied to all h heads.
-            mask = mask.unsqueeze(1)
+            mask = mask.unsqueeze(1).unsqueeze(1)
         nbatches = query.size(0)
         
         # 1) Do all the linear projections in batch from d_model => h x d_k 
@@ -136,6 +136,10 @@ def test():
     batch_size = 2
     sequence_leng = 100
 
+    lengths = torch.tensor([100,50]).long()
+    mask = torch.arange(max(lengths))[None, :] < lengths[:, None]
+    mask = mask.long()
+
     audio_encoder = Encoder(dim_feature, num_heads, dim_ff, dropout, num_layers)
     video_encoder = Encoder(dim_feature, num_heads, dim_ff, dropout, num_layers)
     fused_decoder = Decoder(dim_feature, num_heads, dim_ff, dropout)
@@ -143,9 +147,9 @@ def test():
     a = torch.rand(batch_size, sequence_leng, dim_feature)
     v = torch.rand(batch_size, sequence_leng, dim_feature)
 
-    a = audio_encoder(a)
-    v = video_encoder(v)
-    y = fused_decoder(a, v)
+    a = audio_encoder(a, mask)
+    v = video_encoder(v, mask)
+    y = fused_decoder(a, v, mask)
     print(y.shape)
 
 if __name__=="__main__":
