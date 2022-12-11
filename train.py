@@ -71,11 +71,13 @@ def main():
     parser.add_argument('--input', '-i', default='', help='Input file')
     parser.add_argument('--task', '-t', default='AU', help='Task')
     parser.add_argument('--batch', '-b', type=int, default=16, help='Batch size')
+    parser.add_argument('--rate', '-r', default='1', help='Batch size')
     parser.add_argument('--epoch', '-e', type=int, default=10, help='Number of epoches')
     parser.add_argument('--lr', '-a', type=float, default=0.0001, help='Learning rate')
     parser.add_argument('--datadir', '-d', default='../../../Data/DVlog/', help='Data folder path')
     args = parser.parse_args()
     task = args.task
+    rate = args.rate
     epochs = args.epoch
     resume = args.input
     net_name = args.net
@@ -84,8 +86,8 @@ def main():
     learning_rate = args.lr
     output_dir = 'train_' + net_name + '_uni_' + task 
 
-    trainset = DVlog(data_dir+'train1.pickle')
-    validset = DVlog(data_dir+'valid1.pickle')
+    trainset = DVlog(data_dir+'train'+rate+'.pickle')
+    validset = DVlog(data_dir+'valid'+rate+'.pickle')
     train_criteria = nn.BCELoss()
     valid_criteria = nn.BCELoss()
 
