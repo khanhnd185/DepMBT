@@ -68,5 +68,8 @@ def gen_dataset(rate):
             pickle.dump(dataset[fold], handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 if __name__=="__main__":
-    downsample_rate = 1
-    gen_dataset(downsample_rate)
+    import argparse
+    parser = argparse.ArgumentParser(description='Generate dataset')
+    parser.add_argument('--rate', '-r', type=int, default=1, help='Downsample rate')
+    args = parser.parse_args()
+    gen_dataset(args.rate)
