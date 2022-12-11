@@ -34,7 +34,6 @@ def train(net, trainldr, optimizer, epoch, epochs, learning_rate, criteria):
 
 def val(net, validldr, criteria):
     total_losses = AverageMeter()
-    yhat = {}
     net.eval()
     all_y = None
     all_labels = None
@@ -67,43 +66,34 @@ def val(net, validldr, criteria):
 def main():
     parser = argparse.ArgumentParser(description='Train task seperately')
 
-    parser.add_argument('--net', '-n', default='TransformerFusion', help='Net name')
-    parser.add_argument('--input', '-i', default='', help='Input file')
-    parser.add_argument('--task', '-t', default='AU', help='Task')
+    parser.add_argument('--net', '-n', default='AnnotatedTrasformer', help='Net name')
+    parser.add_argument('--resume', '-r', default='', help='Input file')
     parser.add_argument('--batch', '-b', type=int, default=16, help='Batch size')
-    parser.add_argument('--rate', '-r', default='2', help='Batch size')
+    parser.add_argument('--rate', '-R', default='2', help='Batch size')
     parser.add_argument('--epoch', '-e', type=int, default=10, help='Number of epoches')
-    parser.add_argument('--lr', '-a', type=float, default=0.0001, help='Learning rate')
+    parser.add_argument('--lr', '-a', type=float, default=0.00001, help='Learning rate')
     parser.add_argument('--datadir', '-d', default='../../../Data/DVlog/', help='Data folder path')
     args = parser.parse_args()
-    task = args.task
-    rate = args.rate
-    epochs = args.epoch
-    resume = args.input
-    net_name = args.net
-    data_dir = args.datadir
-    batch_size = args.batch
-    learning_rate = args.lr
-    output_dir = 'train_' + net_name + '_uni_' + task 
+    output_dir = args.net + '_' + args.rate 
 
-    trainset = DVlog(data_dir+'train'+rate+'.pickle')
-    validset = DVlog(data_dir+'valid'+rate+'.pickle')
+    trainset = DVlog(args.datadir+'train'+args.rate+'.pickle')
+    validset = DVlog(args.datadir+'valid'+args.rate+'.pickle')
     train_criteria = nn.BCELoss()
     valid_criteria = nn.BCELoss()
 
-    trainldr = DataLoader(trainset, batch_size=batch_size, collate_fn=collate_fn, shuffle=True, num_workers=0)
-    validldr = DataLoader(validset, batch_size=batch_size, collate_fn=collate_fn, shuffle=False, num_workers=0)
+    trainldr = DataLoader(trainset, batch_size=args.batch, collate_fn=collate_fn, shuffle=True, num_workers=0)
+    validldr = DataLoader(validset, batch_size=args.batch, collate_fn=collate_fn, shuffle=False, num_workers=0)
 
-    if net_name == "TransformerFusion":
+    if args.net == "AnnotatedTrasformer":
         net = StanfordTransformerFusion(136, 25, 128)
     else:
         net = FeatureFusion(161, hidden_features=1024, out_features=1)
-    if resume != '':
-        print("Resume form | {} ]".format(resume))
-        net = load_state_dict(net, resume)
+    if args.resume != '':
+        print("Resume form | {} ]".format(args.resume))
+        net = load_state_dict(net, args.resume)
     net = nn.DataParallel(net).cuda()
 
-    optimizer = torch.optim.AdamW(net.parameters(), betas=(0.9, 0.999), lr=learning_rate, weight_decay=1.0/batch_size)
+    optimizer = torch.optim.AdamW(net.parameters(), betas=(0.9, 0.999), lr=args.lr, weight_decay=1.0/args.batch)
     best_performance = 0.0
     epoch_from_last_improvement = 0
 
@@ -114,13 +104,13 @@ def main():
     df['val_loss'] = []
     df['val_metrics'] = []
 
-    for epoch in range(epochs):
+    for epoch in range(args.epoch):
         lr = optimizer.param_groups[0]['lr']
-        train_loss = train(net, trainldr, optimizer, epoch, epochs, learning_rate, train_criteria)
+        train_loss = train(net, trainldr, optimizer, epoch, args.epoch, args.lr, train_criteria)
         val_loss, val_metrics = val(net, validldr, valid_criteria)
 
-        infostr = {'Task {}: {},{:.5f},{:.5f},{:.5f},{:.5f}'
-                .format(task,
+        infostr = {'Downrate {}: {},{:.5f},{:.5f},{:.5f},{:.5f}'
+                .format(args.rate,
                         epoch,
                         lr,
                         train_loss,
