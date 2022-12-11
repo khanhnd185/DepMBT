@@ -5,7 +5,7 @@ import argparse
 from tqdm import tqdm
 from data import DVlog, collate_fn
 from helpers import *
-from models import FeatureFusion, TransformerFusion
+from models import FeatureFusion, StanfordTransformerFusion
 from torch.utils.data import DataLoader
 
 
@@ -70,9 +70,9 @@ def main():
     parser.add_argument('--net', '-n', default='TransformerFusion', help='Net name')
     parser.add_argument('--input', '-i', default='', help='Input file')
     parser.add_argument('--task', '-t', default='AU', help='Task')
-    parser.add_argument('--batch', '-b', type=int, default=32, help='Batch size')
+    parser.add_argument('--batch', '-b', type=int, default=16, help='Batch size')
     parser.add_argument('--epoch', '-e', type=int, default=10, help='Number of epoches')
-    parser.add_argument('--lr', '-a', type=float, default=0.1, help='Learning rate')
+    parser.add_argument('--lr', '-a', type=float, default=0.0001, help='Learning rate')
     parser.add_argument('--datadir', '-d', default='../../../Data/DVlog/', help='Data folder path')
     args = parser.parse_args()
     task = args.task
@@ -84,16 +84,16 @@ def main():
     learning_rate = args.lr
     output_dir = 'train_' + net_name + '_uni_' + task 
 
-    trainset = DVlog(data_dir+'train.pickle')
-    validset = DVlog(data_dir+'valid.pickle')
+    trainset = DVlog(data_dir+'train1.pickle')
+    validset = DVlog(data_dir+'valid1.pickle')
     train_criteria = nn.BCELoss()
     valid_criteria = nn.BCELoss()
 
-    trainldr = DataLoader(trainset, batch_size=batch_size, collate_fn=collate_fn, shuffle=True, num_workers=0)
+    trainldr = DataLoader(trainset, batch_size=batch_size, collate_fn=collate_fn, shuffle=False, num_workers=0)
     validldr = DataLoader(validset, batch_size=batch_size, collate_fn=collate_fn, shuffle=False, num_workers=0)
 
     if net_name == "TransformerFusion":
-        net = TransformerFusion(136, 25, 256)
+        net = StanfordTransformerFusion(136, 25, 128)
     else:
         net = FeatureFusion(161, hidden_features=1024, out_features=1)
     if resume != '':

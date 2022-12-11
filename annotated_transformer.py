@@ -4,24 +4,21 @@ from torch import nn as nn
 import torch.nn.functional as F
 
 def clones(module, N):
-    "Produce N identical layers."
     return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
 
 class Encoder(nn.Module):
-    "Core encoder is a stack of N layers"
-    def __init__(self, layer, N):
+    def __init__(self, size, h, feed_forward, dropout, N):
         super(Encoder, self).__init__()
+        layer = EncoderLayer(size, h, feed_forward, dropout)
         self.layers = clones(layer, N)
         self.norm = LayerNorm(layer.size)
         
     def forward(self, x, mask=None):
-        "Pass the input (and mask) through each layer in turn."
         for layer in self.layers:
             x = layer(x, mask)
         return self.norm(x)
 
 class LayerNorm(nn.Module):
-    "Construct a layernorm module (See citation for details)."
     def __init__(self, features, eps=1e-6):
         super(LayerNorm, self).__init__()
         self.a_2 = nn.Parameter(torch.ones(features))
@@ -34,21 +31,20 @@ class LayerNorm(nn.Module):
         return self.a_2 * (x - mean) / (std + self.eps) + self.b_2
 
 class SublayerConnection(nn.Module):
-    """
-    A residual connection followed by a layer norm.
-    Note for code simplicity the norm is first as opposed to last.
-    """
     def __init__(self, size, dropout):
         super(SublayerConnection, self).__init__()
+        self.size = size
         self.norm = LayerNorm(size)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x, sublayer):
-        "Apply residual connection to any sublayer with the same size."
-        return x + self.dropout(sublayer(self.norm(x)))
+        y = self.norm(x)
+        z = sublayer(y)
+        t = self.dropout(z)
+        return x + t
+        # return x + self.dropout(sublayer(self.norm(x)))
 
 class EncoderLayer(nn.Module):
-    "Encoder is made up of self-attn and feed forward (defined below)"
     def __init__(self, size, h, feed_forward, dropout):
         super(EncoderLayer, self).__init__()
         self.self_attn = MultiHeadedAttention(h, size)
@@ -57,12 +53,10 @@ class EncoderLayer(nn.Module):
         self.size = size
 
     def forward(self, x, mask=None):
-        "Follow Figure 1 (left) for connections."
         x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, mask))
         return self.sublayer[1](x, self.feed_forward)
 
 def attention(query, key, value, mask=None, dropout=None):
-    "Compute 'Scaled Dot Product Attention'"
     d_k = query.size(-1)
     scores = torch.matmul(query, key.transpose(-2, -1)) \
              / math.sqrt(d_k)
@@ -75,7 +69,6 @@ def attention(query, key, value, mask=None, dropout=None):
 
 class MultiHeadedAttention(nn.Module):
     def __init__(self, h, d_model, dropout=0.1):
-        "Take in model size and number of heads."
         super(MultiHeadedAttention, self).__init__()
         assert d_model % h == 0
         # We assume d_v always equals d_k
@@ -86,7 +79,6 @@ class MultiHeadedAttention(nn.Module):
         self.dropout = nn.Dropout(p=dropout)
         
     def forward(self, query, key, value, mask=None):
-        "Implements Figure 2"
         if mask is not None:
             # Same mask applied to all h heads.
             mask = mask.unsqueeze(1)
@@ -107,7 +99,6 @@ class MultiHeadedAttention(nn.Module):
         return self.linears[-1](x)
 
 class PositionwiseFeedForward(nn.Module):
-    "Implements FFN equation."
     def __init__(self, d_model, d_ff, dropout=0.1):
         super(PositionwiseFeedForward, self).__init__()
         self.w_1 = nn.Linear(d_model, d_ff)
@@ -117,22 +108,45 @@ class PositionwiseFeedForward(nn.Module):
     def forward(self, x):
         return self.w_2(self.dropout(F.relu(self.w_1(x))))
 
+class Decoder(nn.Module):
+    def __init__(self, size, h, feed_forward, dropout):
+        super(Decoder, self).__init__()
+        self.size = size
+        self.audio_attn = MultiHeadedAttention(h, size)
+        self.video_attn = MultiHeadedAttention(h, size)
+        self.fused_attn = MultiHeadedAttention(h, size*2)
+        self.feed_forward = PositionwiseFeedForward(size*2, feed_forward, dropout)
+        self.sublayer1 = clones(SublayerConnection(size, dropout), 2)
+        self.sublayer2 = clones(SublayerConnection(size*2, dropout), 2)
+ 
+    def forward(self, a, v, mask=None):
+        a = self.sublayer1[0](a, lambda a: self.audio_attn(a, v, v, mask))
+        v = self.sublayer1[1](v, lambda v: self.video_attn(v, a, a, mask))
+        f = torch.cat((a, v), dim=2)
+        f = self.sublayer2[0](f, lambda f: self.fused_attn(f, f, f, mask))
+        return self.sublayer2[1](f, self.feed_forward)
+
 def test():
     num_heads = 1
     num_layers = 1
-    dim_ff = 2048
-    dropout = 0
-    dim_feature = 161
+    dim_ff = 1024
+    dropout = 0.2
+    dim_feature = 128
 
     batch_size = 2
     sequence_leng = 100
 
-    encoder = Encoder(EncoderLayer(dim_feature, num_heads, dim_ff, dropout), num_layers)
+    audio_encoder = Encoder(dim_feature, num_heads, dim_ff, dropout, num_layers)
+    video_encoder = Encoder(dim_feature, num_heads, dim_ff, dropout, num_layers)
+    fused_decoder = Decoder(dim_feature, num_heads, dim_ff, dropout)
 
-    x = torch.rand(batch_size, sequence_leng, dim_feature)
-    y = encoder(x)
+    a = torch.rand(batch_size, sequence_leng, dim_feature)
+    v = torch.rand(batch_size, sequence_leng, dim_feature)
+
+    a = audio_encoder(a)
+    v = video_encoder(v)
+    y = fused_decoder(a, v)
     print(y.shape)
-    
 
 if __name__=="__main__":
     test()

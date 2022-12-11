@@ -38,7 +38,7 @@ class DVlog(Dataset):
         return self.dataset[idx][0], self.dataset[idx][1], self.dataset[idx][2], self.length[idx]
 
 
-def gen_dataset():
+def gen_dataset(rate):
     data_dir = '../../../Data/DVlog/'
     feat_dir = os.path.join(data_dir, 'dvlog-dataset')
     label_file = os.path.join(feat_dir, 'labels.csv')
@@ -55,11 +55,19 @@ def gen_dataset():
         audio = np.load(os.path.join(feat_dir, index, index+'_acoustic.npy'))
         visual = np.load(os.path.join(feat_dir, index, index+'_visual.npy'))
 
+        leng = min(audio.shape[0], visual.shape[0])
+
+        audio = audio[:leng, :]
+        visual = visual[:leng, :]
+        audio = audio[::rate, :]
+        visual = visual[::rate, :]
+
         dataset[fold].append((audio, visual, label_index[label]))
 
     for fold in dataset.keys():
-        with open(os.path.join(data_dir, fold+'.pickle'), 'wb') as handle:
+        with open(os.path.join(data_dir, fold+str(rate)+'.pickle'), 'wb') as handle:
             pickle.dump(dataset[fold], handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 if __name__=="__main__":
-    gen_dataset()
+    downsample_rate = 1
+    gen_dataset(downsample_rate)

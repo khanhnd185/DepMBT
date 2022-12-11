@@ -4,7 +4,8 @@ from torch import nn as nn
 from torch.nn import functional as F
 from timm.models.vision_transformer import DropPath, Mlp, Attention
 
-from layers import FusionBlock
+from layers import FusionBlock, get_projection
+from annotated_transformer import Encoder, Decoder
 
 class ShallowNN(nn.Module):
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.Sigmoid, drop=0.):
@@ -58,3 +59,29 @@ class TransformerFusion(nn.Module):
         x = self.fc(x).squeeze(-1)
 
         return x
+
+class StanfordTransformerFusion(nn.Module):
+    def __init__(self, video_dimension, audio_dimension, fused_dimension):
+        super().__init__()
+        feed_forward = 256
+        dropout = 0.2
+        num_layers = 1
+        num_heads = 1
+
+        self.audio_prj = get_projection(audio_dimension, fused_dimension, 'minimal')
+        self.video_prj = get_projection(video_dimension, fused_dimension, 'minimal')
+        self.audio_enc = Encoder(fused_dimension, num_heads, feed_forward, dropout, num_layers)
+        self.video_enc = Encoder(fused_dimension, num_heads, feed_forward, dropout, num_layers)
+        self.fused_dec = Decoder(fused_dimension, num_heads, feed_forward, dropout)
+        self.mlp = ShallowNN(fused_dimension*2, hidden_features=fused_dimension, out_features=1, drop=dropout)
+    
+    def forward(self, a, v, m):
+        a = self.audio_prj(a)
+        v = self.video_prj(v)
+        a = self.audio_enc(a, m)
+        v = self.video_enc(v, m)
+        f = self.fused_dec(a, v)
+        f = f.mean(dim=1)
+        f = self.mlp(f).squeeze(-1)
+
+        return f
