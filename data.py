@@ -37,7 +37,7 @@ class DVlog(Dataset):
         return self.dataset[idx][0], self.dataset[idx][1], self.dataset[idx][2], self.length[idx]
 
 
-def gen_dataset(rate):
+def gen_dataset(rate, keep):
     data_dir = '../../../Data/DVlog/'
     feat_dir = os.path.join(data_dir, 'dvlog-dataset')
     label_file = os.path.join(feat_dir, 'labels.csv')
@@ -58,10 +58,15 @@ def gen_dataset(rate):
 
         audio = audio[:leng, :]
         visual = visual[:leng, :]
-        audio = audio[::rate, :]
-        visual = visual[::rate, :]
-
-        dataset[fold].append((audio, visual, label_index[label]))
+        if fold == 'train' and keep:
+            for j in range(rate):
+                a = audio[j::rate, :]
+                v = visual[j::rate, :]
+                dataset[fold].append((a, v, label_index[label]))
+        else:
+            a = audio[::rate, :]
+            v = visual[::rate, :]
+            dataset[fold].append((a, v, label_index[label]))
 
     for fold in dataset.keys():
         with open(os.path.join(data_dir, fold+str(rate)+'.pickle'), 'wb') as handle:
@@ -71,5 +76,6 @@ if __name__=="__main__":
     import argparse
     parser = argparse.ArgumentParser(description='Generate dataset')
     parser.add_argument('--rate', '-r', type=int, default=1, help='Downsample rate')
+    parser.add_argument('--keep', '-', action='store_true', help='Keep all data in training set')
     args = parser.parse_args()
-    gen_dataset(args.rate)
+    gen_dataset(args.rate, args.keep)
