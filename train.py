@@ -4,6 +4,7 @@ import pandas
 import argparse
 from tqdm import tqdm
 from data import DVlog, collate_fn
+from sam import SAM
 from helpers import *
 from models import FeatureFusion, StanfordTransformerFusion
 from torch.utils.data import DataLoader
@@ -28,6 +29,33 @@ def train(net, trainldr, optimizer, epoch, epochs, learning_rate, criteria):
         loss = criteria(y, labels)
         loss.backward()
         optimizer.step()
+
+        total_losses.update(loss.data.item(), feature_audio.size(0))
+    return total_losses.avg()
+
+def train_sam(net, trainldr, optimizer, epoch, epochs, learning_rate, criteria):
+    total_losses = AverageMeter()
+    net.train()
+    train_loader_len = len(trainldr)
+    for batch_idx, data in enumerate(tqdm(trainldr)):
+        feature_audio, feature_video, mask, labels = data
+
+        # adjust_learning_rate(optimizer, epoch, epochs, learning_rate, batch_idx, train_loader_len)
+        feature_audio = feature_audio.cuda()
+        feature_video = feature_video.cuda()
+        mask = mask.cuda()
+        labels = labels.float()
+        labels = labels.cuda()
+        optimizer.zero_grad()
+
+        y = net(feature_audio, feature_video, mask)
+        loss = criteria(y, labels)
+        loss.backward()
+        optimizer.first_step(zero_grad=True)
+
+        y = net(feature_audio, feature_video, mask)
+        criteria(y, labels).backward()
+        optimizer.second_step(zero_grad=True)
 
         total_losses.update(loss.data.item(), feature_audio.size(0))
     return total_losses.avg()
@@ -73,6 +101,8 @@ def main():
     parser.add_argument('--epoch', '-e', type=int, default=10, help='Number of epoches')
     parser.add_argument('--lr', '-a', type=float, default=0.00001, help='Learning rate')
     parser.add_argument('--datadir', '-d', default='../../../Data/DVlog/', help='Data folder path')
+    parser.add_argument('--sam', '-s', action='store_true', help='Apply SAM optimizer')
+
     args = parser.parse_args()
     output_dir = args.net + '_' + args.rate 
 
@@ -93,7 +123,11 @@ def main():
         net = load_state_dict(net, args.resume)
     net = nn.DataParallel(net).cuda()
 
-    optimizer = torch.optim.AdamW(net.parameters(), betas=(0.9, 0.999), lr=args.lr, weight_decay=1.0/args.batch)
+    if args.sam:
+        base_optimizer = torch.optim.SGD
+        optimizer = SAM(net.parameters(), base_optimizer, lr=args.lr, momentum=0.9, weight_decay=1.0/args.batch)
+    else:
+        optimizer = torch.optim.AdamW(net.parameters(), betas=(0.9, 0.999), lr=args.lr, weight_decay=1.0/args.batch)
     best_performance = 0.0
     epoch_from_last_improvement = 0
 
@@ -106,7 +140,10 @@ def main():
 
     for epoch in range(args.epoch):
         lr = optimizer.param_groups[0]['lr']
-        train_loss = train(net, trainldr, optimizer, epoch, args.epoch, args.lr, train_criteria)
+        if args.sam:
+            train_loss = train_sam(net, trainldr, optimizer, epoch, args.epoch, args.lr, train_criteria)
+        else:
+            train_loss = train(net, trainldr, optimizer, epoch, args.epoch, args.lr, train_criteria)
         val_loss, val_metrics = val(net, validldr, valid_criteria)
 
         infostr = {'Downrate {}: {},{:.5f},{:.5f},{:.5f},{:.5f}'
