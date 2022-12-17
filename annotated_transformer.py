@@ -30,31 +30,24 @@ class LayerNorm(nn.Module):
         std = x.std(-1, keepdim=True)
         return self.a_2 * (x - mean) / (std + self.eps) + self.b_2
 
-class SublayerConnection(nn.Module):
-    def __init__(self, size, dropout):
-        super(SublayerConnection, self).__init__()
-        self.size = size
-        self.norm = LayerNorm(size)
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, x, sublayer):
-        y = self.norm(x)
-        z = sublayer(y)
-        t = self.dropout(z)
-        return x + t
-        # return x + self.dropout(sublayer(self.norm(x)))
-
 class EncoderLayer(nn.Module):
     def __init__(self, size, h, feed_forward, dropout):
         super(EncoderLayer, self).__init__()
         self.self_attn = MultiHeadedAttention(h, size)
         self.feed_forward = PositionwiseFeedForward(size, feed_forward, dropout)
-        self.sublayer = clones(SublayerConnection(size, dropout), 2)
         self.size = size
 
+        self.norm1 = LayerNorm(size)
+        self.norm2 = LayerNorm(size)
+        self.drop1 = nn.Dropout(dropout)
+        self.drop2 = nn.Dropout(dropout)
+
     def forward(self, x, mask=None):
-        x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, mask))
-        return self.sublayer[1](x, self.feed_forward)
+        x1 = self.norm1(x)
+        x = x + self.drop1(self.self_attn(x1, x1, x1, mask))
+        x2 = self.norm2(x)
+        x = x + self.drop2(self.feed_forward(x2))
+        return x
 
 def attention(query, key, value, mask=None, dropout=None):
     d_k = query.size(-1)
@@ -116,15 +109,24 @@ class Decoder(nn.Module):
         self.video_attn = MultiHeadedAttention(h, size)
         self.fused_attn = MultiHeadedAttention(h, size*2)
         self.feed_forward = PositionwiseFeedForward(size*2, feed_forward, dropout)
-        self.sublayer1 = clones(SublayerConnection(size, dropout), 2)
-        self.sublayer2 = clones(SublayerConnection(size*2, dropout), 2)
+        self.norm1 = LayerNorm(size)
+        self.norm2 = LayerNorm(size)
+        self.norm3 = LayerNorm(size*2)
+        self.norm4 = LayerNorm(size*2)
+        self.drop1 = nn.Dropout(dropout)
+        self.drop2 = nn.Dropout(dropout)
+        self.drop3 = nn.Dropout(dropout)
+        self.drop4 = nn.Dropout(dropout)
  
     def forward(self, a, v, mask=None):
-        a = self.sublayer1[0](a, lambda a: self.audio_attn(a, v, v, mask))
-        v = self.sublayer1[1](v, lambda v: self.video_attn(v, a, a, mask))
-        f = torch.cat((a, v), dim=2)
-        f = self.sublayer2[0](f, lambda f: self.fused_attn(f, f, f, mask))
-        return self.sublayer2[1](f, self.feed_forward)
+        a1 = a + self.drop1(self.audio_attn(self.norm1(a), v, v, mask))
+        v1 = v + self.drop2(self.video_attn(self.norm2(v), a, a, mask))
+        f = torch.cat((a1, v1), dim=2)
+        f1 = self.norm3(f)
+        f = f + self.drop3(self.fused_attn(f1, f1, f1, mask))
+        f2 = self.norm4(f)
+        f = f + self.drop4(self.feed_forward(f2))
+        return f
 
 def test():
     num_heads = 1
