@@ -8,6 +8,8 @@ from layers import FusionBlock, get_projection
 from annotated_transformer import Encoder, Decoder, LayerNorm
 from annotated_transformer import MultiHeadedAttention, PositionwiseFeedForward
 
+from detr_transformer import TransformerEncoder, TransformerEncoderLayer
+
 class ShallowNN(nn.Module):
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.Sigmoid, drop=0.):
         super().__init__()
@@ -82,7 +84,6 @@ class StanfordTransformerFusion(nn.Module):
         a = self.audio_enc(a, m)
         v = self.video_enc(v, m)
         f = self.fused_dec(a, v, m)
-        f = f.mean(dim=1)
         out = torch.matmul(m.unsqueeze(1).float(), f)
         out = out / m.sum(dim=1).unsqueeze(-1).unsqueeze(-1)
         out = out.squeeze(1)
@@ -114,7 +115,7 @@ class AblationModel(nn.Module):
     def __init__(self, video_dimension, audio_dimension, fused_dimension, config_num):
         super().__init__()
         feed_forward = 256
-        dropout = 0.2
+        dropout = 0.1
         num_layers = 1
         num_heads = 1
 
@@ -172,3 +173,51 @@ class AblationModel(nn.Module):
         out = self.mlp(out).squeeze(-1)
 
         return out
+
+
+class DetrTransformerFusion(nn.Module):
+    def __init__(self, video_dimension, audio_dimension, fused_dimension):
+        super().__init__()
+        feed_forward = 256
+        dropout = 0.2
+        num_layers = 1
+        num_heads = 1
+        normalize_before = True
+
+        self.audio_prj = get_projection(audio_dimension, fused_dimension, 'minimal')
+        self.video_prj = get_projection(video_dimension, fused_dimension, 'minimal')
+
+        
+        a_encoder_layer = TransformerEncoderLayer(fused_dimension, num_heads, feed_forward, dropout, "relu", normalize_before)
+        a_encoder_norm = nn.LayerNorm(fused_dimension) if normalize_before else None
+        self.audio_enc = TransformerEncoder(a_encoder_layer, num_layers, a_encoder_norm)
+
+        v_encoder_layer = TransformerEncoderLayer(fused_dimension, num_heads, feed_forward, dropout, "relu", normalize_before)
+        v_encoder_norm = nn.LayerNorm(fused_dimension) if normalize_before else None
+        self.video_enc = TransformerEncoder(v_encoder_layer, num_layers, v_encoder_norm)
+
+        f_encoder_layer = TransformerEncoderLayer(fused_dimension*2, num_heads, feed_forward, dropout, "relu", normalize_before)
+        f_encoder_norm = nn.LayerNorm(fused_dimension*2) if normalize_before else None
+        self.fused_enc = TransformerEncoder(f_encoder_layer, num_layers, f_encoder_norm)
+
+        self.mlp = ShallowNN(fused_dimension*2, hidden_features=fused_dimension, out_features=1, drop=dropout)
+    
+    def forward(self, a, v, m):
+        mask = (m == 0).long()
+        a = self.audio_prj(a)
+        v = self.video_prj(v)
+        a = a.permute(1, 0, 2)
+        v = v.permute(1, 0, 2)
+        a = self.audio_enc(a, src_key_padding_mask=mask)
+        v = self.video_enc(v, src_key_padding_mask=mask)
+        f = torch.cat((a, v), dim=2)
+        f = self.fused_enc(f, src_key_padding_mask=mask)
+        f = f.permute(1, 0, 2)
+        out = torch.matmul(m.unsqueeze(1).float(), f)
+        out = out / m.sum(dim=1).unsqueeze(-1).unsqueeze(-1)
+        out = out.squeeze(1)
+        out = self.mlp(out).squeeze(-1)
+
+        return out
+
+

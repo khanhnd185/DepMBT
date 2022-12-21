@@ -3,7 +3,7 @@ import argparse
 from tqdm import tqdm
 from data import DVlog, collate_fn
 from helpers import *
-from models import FeatureFusion, StanfordTransformerFusion
+from models import FeatureFusion, StanfordTransformerFusion, DetrTransformerFusion
 from torch.utils.data import DataLoader
 
 def val(net, validldr, criteria):
@@ -53,6 +53,8 @@ def main():
 
     if args.net == "AnnotatedTrasformer":
         net = StanfordTransformerFusion(136, 25, 128)
+    elif args.net == "detr":
+        net = DetrTransformerFusion(136, 25, 128)
     else:
         net = FeatureFusion(161, hidden_features=1024, out_features=1)
 
