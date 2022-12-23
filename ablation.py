@@ -162,7 +162,6 @@ def main():
                 'val_loss': val_loss,
                 'val_metrics': val_metrics,
                 'state_dict': net.state_dict(),
-                'optimizer': optimizer.state_dict(),
             }
             torch.save(checkpoint, os.path.join('results', output_dir, 'best_val_perform.pth'))
             best_performance = val_metrics
@@ -174,7 +173,6 @@ def main():
         checkpoint = {
             'epoch': epoch,
             'state_dict': net.state_dict(),
-            'optimizer': optimizer.state_dict(),
         }
         torch.save(checkpoint, os.path.join('results', output_dir, 'cur_model.pth'))
 
