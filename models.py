@@ -4,7 +4,7 @@ from torch import nn as nn
 from torch.nn import functional as F
 from timm.models.vision_transformer import DropPath, Mlp, Attention
 
-from layers import FusionBlock, get_projection
+from layers import FusionBlock, get_projection, GAP
 from annotated_transformer import Encoder, Decoder, LayerNorm
 from annotated_transformer import MultiHeadedAttention, PositionwiseFeedForward
 
@@ -76,6 +76,7 @@ class StanfordTransformerFusion(nn.Module):
         self.audio_enc = Encoder(fused_dimension, num_heads, feed_forward, dropout, num_layers)
         self.video_enc = Encoder(fused_dimension, num_heads, feed_forward, dropout, num_layers)
         self.fused_dec = Decoder(fused_dimension, num_heads, feed_forward, dropout)
+        self.gap = GAP()
         self.mlp = ShallowNN(fused_dimension*2, hidden_features=fused_dimension, out_features=1, drop=dropout)
     
     def forward(self, a, v, m):
@@ -84,9 +85,7 @@ class StanfordTransformerFusion(nn.Module):
         a = self.audio_enc(a, m)
         v = self.video_enc(v, m)
         f = self.fused_dec(a, v, m)
-        out = torch.matmul(m.unsqueeze(1).float(), f)
-        out = out / m.sum(dim=1).unsqueeze(-1).unsqueeze(-1)
-        out = out.squeeze(1)
+        out = self.gap(f, m)
         out = self.mlp(out).squeeze(-1)
 
         return out
@@ -143,6 +142,7 @@ class AblationModel(nn.Module):
         self.drop3 = nn.Dropout(dropout)
         self.drop4 = nn.Dropout(dropout)
 
+        self.gap = GAP()
         self.mlp = ShallowNN(fused_dimension*2, hidden_features=fused_dimension, out_features=1, drop=dropout)
 
     def forward(self, a, v, m):
@@ -167,9 +167,7 @@ class AblationModel(nn.Module):
             f2 = self.norm4(f)
             f = f + self.drop4(self.feed_forward(f2))
 
-        out = torch.matmul(m.unsqueeze(1).float(), f)
-        out = out / m.sum(dim=1).unsqueeze(-1).unsqueeze(-1)
-        out = out.squeeze(1)
+        out = self.gap(f, m)
         out = self.mlp(out).squeeze(-1)
 
         return out
@@ -200,6 +198,7 @@ class DetrTransformerFusion(nn.Module):
         f_encoder_norm = nn.LayerNorm(fused_dimension*2) if normalize_before else None
         self.fused_enc = TransformerEncoder(f_encoder_layer, num_layers, f_encoder_norm)
 
+        self.gap = GAP()
         self.mlp = ShallowNN(fused_dimension*2, hidden_features=fused_dimension, out_features=1, drop=dropout)
     
     def forward(self, a, v, m):
@@ -213,9 +212,7 @@ class DetrTransformerFusion(nn.Module):
         f = torch.cat((a, v), dim=2)
         f = self.fused_enc(f, src_key_padding_mask=mask)
         f = f.permute(1, 0, 2)
-        out = torch.matmul(m.unsqueeze(1).float(), f)
-        out = out / m.sum(dim=1).unsqueeze(-1).unsqueeze(-1)
-        out = out.squeeze(1)
+        out = self.gap(f, m)
         out = self.mlp(out).squeeze(-1)
 
         return out

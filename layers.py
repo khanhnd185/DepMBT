@@ -102,6 +102,21 @@ class FusionAttention(Attention):
         x = self.proj_drop(x)
         return x
 
+class GAP(nn.Module):
+    def __init__(self, mask=True):
+        super(GAP, self).__init__()
+        self.mask = mask
+
+    def forward(self, x, m):
+        if self.mask:
+            out = x.mean(dim=1)
+        else:
+            out = torch.matmul(m.unsqueeze(1).float(), x)
+            out = out.squeeze(1) / m.sum(dim=1).unsqueeze(-1)
+
+        return out
+
+
 
 def get_projection(input_dim, output_dim, projection_type):
     if projection_type == 'minimal':

@@ -8,7 +8,7 @@ from sam import SAM
 from helpers import *
 from models import FeatureFusion, StanfordTransformerFusion, DetrTransformerFusion
 from torch.utils.data import DataLoader
-
+from copy import deepcopy
 
 def train(net, trainldr, optimizer, epoch, epochs, learning_rate, criteria):
     total_losses = AverageMeter()
@@ -168,6 +168,7 @@ def main():
             }
             torch.save(checkpoint, os.path.join('results', output_dir, 'best_val_perform.pth'))
             best_performance = val_metrics
+            best_model = deepcopy(net)
             epoch_from_last_improvement = 0
         else:
             epoch_from_last_improvement += 1
@@ -184,6 +185,13 @@ def main():
         df['val_loss'].append(val_loss)
         df['val_metrics'].append(val_metrics)
    
+    validset = DVlog(args.datadir+'test'+args.rate+'.pickle')
+    valid_criteria = nn.BCELoss()
+    validldr = DataLoader(validset, batch_size=args.batch, collate_fn=collate_fn, shuffle=False, num_workers=0)
+
+    best_model = nn.DataParallel(best_model).cuda()
+    val_loss, val_metrics = val(best_model, validldr, valid_criteria)
+    print('Test set {}: {:.5f},{:.5f}'.format(args.rate, val_loss, val_metrics))
 
     df = pandas.DataFrame(df)
     csv_name = os.path.join('results', output_dir, 'train.csv')
