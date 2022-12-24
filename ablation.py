@@ -9,6 +9,7 @@ from sam import SAM
 from helpers import *
 from models import AblationModel
 from torch.utils.data import DataLoader
+from sklearn.metrics import recall_score, precision_score, accuracy_score, confusion_matrix
 
 
 def train(net, trainldr, optimizer, epoch, epochs, learning_rate, criteria):
@@ -88,8 +89,12 @@ def val(net, validldr, criteria):
     all_y = all_y >= 0.5
     all_y = all_y.long().cpu().numpy()
     all_labels = all_labels.cpu().numpy()
-    metrics = f1_score(all_labels, all_y)
-    return total_losses.avg(), metrics
+    f1 = f1_score(all_labels, all_y)
+    r = recall_score(all_labels, all_y)
+    p = precision_score(all_labels, all_y)
+    acc = accuracy_score(all_labels, all_y)
+    cm = confusion_matrix(all_labels, all_y)
+    return total_losses.avg(), f1, r, p, acc, cm
 
 
 def main():
@@ -115,7 +120,7 @@ def main():
     trainldr = DataLoader(trainset, batch_size=args.batch, collate_fn=collate_fn, shuffle=True, num_workers=0)
     validldr = DataLoader(validset, batch_size=args.batch, collate_fn=collate_fn, shuffle=False, num_workers=0)
 
-    net = AblationModel(136, 25, 128, args.config)
+    net = AblationModel(136, 25, 256, args.config)
 
     if args.resume != '':
         print("Resume form | {} ]".format(args.resume))
@@ -131,11 +136,18 @@ def main():
     epoch_from_last_improvement = 0
 
     df = {}
-    df['epoch'] = []
-    df['lr'] = []
-    df['train_loss'] = []
+    # df['epoch'] = []
+    # df['lr'] = []
+    # df['train_loss'] = []
     df['val_loss'] = []
     df['val_metrics'] = []
+    df['val_recall'] = []
+    df['val_precision'] = []
+    df['val_acc'] = []
+    df['val_tn'] = []
+    df['val_fp'] = []
+    df['val_fn'] = []
+    df['val_tp'] = []
 
     for epoch in range(args.epoch):
         lr = optimizer.param_groups[0]['lr']
@@ -143,28 +155,37 @@ def main():
             train_loss = train_sam(net, trainldr, optimizer, epoch, args.epoch, args.lr, train_criteria)
         else:
             train_loss = train(net, trainldr, optimizer, epoch, args.epoch, args.lr, train_criteria)
-        val_loss, val_metrics = val(net, validldr, valid_criteria)
+        val_loss, val_metrics, val_recall, val_precision, val_acc, val_matrix = val(net, validldr, valid_criteria)
 
-        infostr = {'Downrate {}: {},{:.5f},{:.5f},{:.5f},{:.5f}'
+        infostr = {'Downrate {}: {},{:.5f},{:.5f},{:.5f},{:.5f},{:.5f},{:.5f},{:.5f}'
                 .format(args.rate,
                         epoch,
                         lr,
                         train_loss,
                         val_loss,
+                        val_acc,
+                        val_recall,
+                        val_precision,
                         val_metrics)}
+        print(infostr)
+        infostr = {'Confusion matrix {} {} {} {}'
+                .format(val_matrix[0][0],
+                        val_matrix[0][1],
+                        val_matrix[1][0],
+                        val_matrix[1][1])}
         print(infostr)
 
         os.makedirs(os.path.join('results', output_dir), exist_ok = True)
 
-        if val_metrics >= best_performance:
+        if val_acc >= best_performance:
             checkpoint = {
                 'epoch': epoch,
                 'val_loss': val_loss,
-                'val_metrics': val_metrics,
+                'val_acc': val_acc,
                 'state_dict': net.state_dict(),
             }
             torch.save(checkpoint, os.path.join('results', output_dir, 'best_val_perform.pth'))
-            best_performance = val_metrics
+            best_performance = val_acc
             epoch_from_last_improvement = 0
             best_model = deepcopy(net)
         else:
@@ -176,11 +197,18 @@ def main():
         }
         torch.save(checkpoint, os.path.join('results', output_dir, 'cur_model.pth'))
 
-        df['epoch'].append(epoch)
-        df['lr'].append(lr)
-        df['train_loss'].append(train_loss)
+        # df['epoch'].append(epoch)
+        # df['lr'].append(lr)
+        # df['train_loss'].append(train_loss)
         df['val_loss'].append(val_loss)
         df['val_metrics'].append(val_metrics)
+        df['val_acc'].append(val_acc)
+        df['val_recall'].append(val_recall)
+        df['val_precision'].append(val_precision)
+        df['val_tn'].append(val_matrix[0][0])
+        df['val_fp'].append(val_matrix[0][1])
+        df['val_fn'].append(val_matrix[1][0])
+        df['val_tp'].append(val_matrix[1][1])
 
 
     validset = DVlog(args.datadir+'test'+args.rate+'.pickle')
@@ -188,14 +216,27 @@ def main():
     validldr = DataLoader(validset, batch_size=args.batch, collate_fn=collate_fn, shuffle=False, num_workers=0)
 
     best_model = nn.DataParallel(best_model).cuda()
-    val_loss, val_metrics = val(best_model, validldr, valid_criteria)
-    print('Test set {}: {:.5f},{:.5f}'.format(args.rate, val_loss, val_metrics))
+    val_loss, val_metrics, val_recall, val_precision, val_acc, val_matrix = val(best_model, validldr, valid_criteria)
+    print('Test set {}: {:.5f},{:.5f},{:.5f},{:.5f},{:.5f}'.format(args.rate, val_loss, val_acc, val_recall, val_precision, val_metrics))
+    infostr = {'Confusion matrix {} {} {} {}'
+            .format(val_matrix[0][0],
+                    val_matrix[0][1],
+                    val_matrix[1][0],
+                    val_matrix[1][1])}
+    print(infostr)
 
-    df['epoch'].append(args.epoch)
-    df['lr'].append(lr)
-    df['train_loss'].append(0)
+    # df['epoch'].append(args.epoch)
+    # df['lr'].append(lr)
+    # df['train_loss'].append(0)
     df['val_loss'].append(val_loss)
     df['val_metrics'].append(val_metrics)
+    df['val_acc'].append(val_acc)
+    df['val_recall'].append(val_recall)
+    df['val_precision'].append(val_precision)
+    df['val_tn'].append(val_matrix[0][0])
+    df['val_fp'].append(val_matrix[0][1])
+    df['val_fn'].append(val_matrix[1][0])
+    df['val_tp'].append(val_matrix[1][1])
 
     df = pandas.DataFrame(df)
     csv_name = os.path.join('results', output_dir, 'train.csv')
