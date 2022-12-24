@@ -67,7 +67,7 @@ class StanfordTransformerFusion(nn.Module):
     def __init__(self, video_dimension, audio_dimension, fused_dimension):
         super().__init__()
         feed_forward = 256
-        dropout = 0.2
+        dropout = 0.1
         num_layers = 1
         num_heads = 1
 
@@ -114,7 +114,7 @@ class AblationModel(nn.Module):
     def __init__(self, video_dimension, audio_dimension, fused_dimension, config_num):
         super().__init__()
         feed_forward = 256
-        dropout = 0.1
+        dropout = 0.2
         num_layers = 1
         num_heads = 1
 
@@ -124,6 +124,23 @@ class AblationModel(nn.Module):
         self.enable_self_attention = config_num % 2
         self.enable_cross_attention = (config_num // 2) % 2
         self.enable_fused_attention = (config_num // 4) % 2
+
+
+        self.aself_attn = MultiHeadedAttention(num_heads, fused_dimension)
+        self.afeed_forward = PositionwiseFeedForward(fused_dimension, feed_forward, dropout)
+        self.anorm1 = LayerNorm(fused_dimension)
+        self.anorm2 = LayerNorm(fused_dimension)
+        self.adrop1 = nn.Dropout(dropout)
+        self.adrop2 = nn.Dropout(dropout)
+        self.anorm3 = LayerNorm(fused_dimension)
+
+        self.vself_attn = MultiHeadedAttention(num_heads, fused_dimension)
+        self.vfeed_forward = PositionwiseFeedForward(fused_dimension, feed_forward, dropout)
+        self.vnorm1 = LayerNorm(fused_dimension)
+        self.vnorm2 = LayerNorm(fused_dimension)
+        self.vdrop1 = nn.Dropout(dropout)
+        self.vdrop2 = nn.Dropout(dropout)
+        self.vnorm3 = LayerNorm(fused_dimension)
 
         self.audio_enc = Encoder(fused_dimension, num_heads, feed_forward, dropout, num_layers)
         self.video_enc = Encoder(fused_dimension, num_heads, feed_forward, dropout, num_layers)
@@ -149,8 +166,17 @@ class AblationModel(nn.Module):
         a = self.audio_prj(a)
         v = self.video_prj(v)
         if self.enable_self_attention:
-            a = self.audio_enc(a, m)
-            v = self.video_enc(v, m)
+            ax1 = self.anorm1(a)
+            a = a + self.adrop1(self.aself_attn(ax1, ax1, ax1, m))
+            ax2 = self.anorm2(a)
+            a = a + self.adrop2(self.afeed_forward(ax2))
+            a = self.anorm3(a)
+
+            vx1 = self.vnorm1(v)
+            v = v + self.vdrop1(self.vself_attn(vx1, vx1, vx1, m))
+            vx2 = self.vnorm2(v)
+            v = v + self.vdrop2(self.vfeed_forward(vx2))
+            v = self.vnorm3(v)
 
         if self.enable_cross_attention:
             a1 = a + self.drop1(self.audio_attn(self.norm1(a), v, v, m))
