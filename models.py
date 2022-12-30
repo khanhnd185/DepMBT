@@ -3,6 +3,7 @@ import torch
 from torch import nn as nn
 from torch.nn import functional as F
 from timm.models.vision_transformer import DropPath, Mlp, Attention
+from timm.models.layers import trunc_normal_
 
 from layers import FusionBlock, get_projection, GAP
 from annotated_transformer import Encoder, Decoder, LayerNorm
@@ -125,6 +126,9 @@ class AblationModel(nn.Module):
         self.enable_cross_attention = (config_num // 2) % 2
         self.enable_fused_attention = (config_num // 4) % 2
 
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, fused_dimension*2))
+        self.mask_appnd = nn.Parameter(torch.ones(1, 1))
+        trunc_normal_(self.cls_token, std=.02)
 
         self.aself_attn = MultiHeadedAttention(num_heads, fused_dimension)
         self.afeed_forward = PositionwiseFeedForward(fused_dimension, feed_forward, dropout)
@@ -159,10 +163,11 @@ class AblationModel(nn.Module):
         self.drop3 = nn.Dropout(dropout)
         self.drop4 = nn.Dropout(dropout)
 
-        self.gap = GAP()
-        self.mlp = ShallowNN(fused_dimension*2, hidden_features=fused_dimension, out_features=1, drop=dropout)
+        self.norm = LayerNorm(fused_dimension*2)
+        self.head = nn.Linear(fused_dimension*2, 2)
 
     def forward(self, a, v, m):
+        B = a.shape[0]
         a = self.audio_prj(a)
         v = self.video_prj(v)
         if self.enable_self_attention:
@@ -186,15 +191,18 @@ class AblationModel(nn.Module):
             v1 = v
 
         f = torch.cat((a1, v1), dim=2)
+        cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
+        mask_appnd = self.mask_appnd.expand(B, -1)
+        m = torch.cat((mask_appnd, m), dim=1)
+        f = torch.cat((cls_tokens, f), dim=1)
 
-        if self.enable_fused_attention:
-            f1 = self.norm3(f)
-            f = f + self.drop3(self.fused_attn(f1, f1, f1, m))
-            f2 = self.norm4(f)
-            f = f + self.drop4(self.feed_forward(f2))
+        f1 = self.norm3(f)
+        f = f + self.drop3(self.fused_attn(f1, f1, f1, m))
+        f2 = self.norm4(f)
+        f = f + self.drop4(self.feed_forward(f2))
 
-        out = self.gap(f, m)
-        out = self.mlp(out).squeeze(-1)
+        out = self.norm(f)[:, 0]
+        out = self.head(out)
 
         return out
 

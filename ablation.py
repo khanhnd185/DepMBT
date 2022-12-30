@@ -23,7 +23,7 @@ def train(net, trainldr, optimizer, epoch, epochs, learning_rate, criteria):
         feature_audio = feature_audio.cuda()
         feature_video = feature_video.cuda()
         mask = mask.cuda()
-        labels = labels.float()
+        #labels = labels.float()
         labels = labels.cuda()
         optimizer.zero_grad()
 
@@ -46,7 +46,7 @@ def train_sam(net, trainldr, optimizer, epoch, epochs, learning_rate, criteria):
         feature_audio = feature_audio.cuda()
         feature_video = feature_video.cuda()
         mask = mask.cuda()
-        labels = labels.float()
+        #labels = labels.float()
         labels = labels.cuda()
         optimizer.zero_grad()
 
@@ -62,6 +62,24 @@ def train_sam(net, trainldr, optimizer, epoch, epochs, learning_rate, criteria):
         total_losses.update(loss.data.item(), feature_audio.size(0))
     return total_losses.avg()
 
+def transform(y, yhat):
+    i = np.argmax(yhat, axis=1)
+    yhat = np.zeros(yhat.shape)
+    yhat[np.arange(len(i)), i] = 1
+
+    if not len(y.shape) == 1:
+        if y.shape[1] == 1:
+            y = y.reshape(-1)
+        else:
+            y = np.argmax(y, axis=-1)
+    if not len(yhat.shape) == 1:
+        if yhat.shape[1] == 1:
+            yhat = yhat.reshape(-1)
+        else:
+            yhat = np.argmax(yhat, axis=-1)
+
+    return y, yhat
+
 def val(net, validldr, criteria):
     total_losses = AverageMeter()
     net.eval()
@@ -73,7 +91,7 @@ def val(net, validldr, criteria):
             feature_audio = feature_audio.cuda()
             feature_video = feature_video.cuda()
             mask = mask.cuda()
-            labels = labels.float()
+            #labels = labels.float()
             labels = labels.cuda()
 
             y = net(feature_audio, feature_video, mask)
@@ -86,9 +104,11 @@ def val(net, validldr, criteria):
             else:
                 all_y = torch.cat((all_y, y), 0)
                 all_labels = torch.cat((all_labels, labels), 0)
-    all_y = all_y >= 0.5
-    all_y = all_y.long().cpu().numpy()
+
+    all_y = all_y.cpu().numpy()
     all_labels = all_labels.cpu().numpy()
+    all_labels, all_y = transform(all_labels, all_y)
+
     f1 = f1_score(all_labels, all_y)
     r = recall_score(all_labels, all_y)
     p = precision_score(all_labels, all_y)
@@ -114,8 +134,8 @@ def main():
 
     trainset = DVlog(args.datadir+'train'+args.rate+'.pickle')
     validset = DVlog(args.datadir+'valid'+args.rate+'.pickle')
-    train_criteria = nn.BCELoss()
-    valid_criteria = nn.BCELoss()
+    train_criteria = nn.CrossEntropyLoss()
+    valid_criteria = nn.CrossEntropyLoss()
 
     trainldr = DataLoader(trainset, batch_size=args.batch, collate_fn=collate_fn, shuffle=True, num_workers=0)
     validldr = DataLoader(validset, batch_size=args.batch, collate_fn=collate_fn, shuffle=False, num_workers=0)
@@ -212,7 +232,7 @@ def main():
 
 
     validset = DVlog(args.datadir+'test'+args.rate+'.pickle')
-    valid_criteria = nn.BCELoss()
+    valid_criteria = nn.CrossEntropyLoss()
     validldr = DataLoader(validset, batch_size=args.batch, collate_fn=collate_fn, shuffle=False, num_workers=0)
 
     best_model = nn.DataParallel(best_model).cuda()
