@@ -168,35 +168,40 @@ class AblationModel(nn.Module):
         a = self.audio_prj(a)
         v = self.video_prj(v)
         if self.enable_self_attention:
-            ax1 = self.anorm1(a)
-            a = a + self.adrop1(self.aself_attn(ax1, ax1, ax1, m))
-            ax2 = self.anorm2(a)
-            a = a + self.adrop2(self.afeed_forward(ax2))
-            a = self.anorm3(a)
+            residual = a
+            a = self.anorm1(a)
+            a = residual + self.adrop1(self.aself_attn(a, a, a, m))
+            residual = a
+            a = self.anorm2(a)
+            a = residual + self.adrop2(self.afeed_forward(a))
 
-            vx1 = self.vnorm1(v)
-            v = v + self.vdrop1(self.vself_attn(vx1, vx1, vx1, m))
-            vx2 = self.vnorm2(v)
-            v = v + self.vdrop2(self.vfeed_forward(vx2))
-            v = self.vnorm3(v)
+            residual = v
+            v = self.vnorm1(v)
+            v = residual + self.vdrop1(self.vself_attn(v, v, v, m))
+            residual = v
+            v = self.vnorm2(v)
+            v = residual + self.vdrop2(self.vfeed_forward(v))
 
         if self.enable_cross_attention:
-            a1 = a + self.drop1(self.audio_attn(self.norm1(a), v, v, m))
-            v1 = v + self.drop2(self.video_attn(self.norm2(v), a, a, m))
-        else:
-            a1 = a
-            v1 = v
+            residual_a = a
+            residual_v = v
+            a = self.norm1(a)
+            v = self.norm2(v)
+            a = residual_a + self.drop1(self.audio_attn(a, v, v, m))
+            v = residual_v + self.drop2(self.video_attn(v, a, a, m))
 
-        f = torch.cat((a1, v1), dim=2)
+        f = torch.cat((a, v), dim=2)
         cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
         mask_appnd = self.mask_appnd.expand(B, -1)
         m = torch.cat((mask_appnd, m), dim=1)
         f = torch.cat((cls_tokens, f), dim=1)
 
-        f1 = self.norm3(f)
-        f = f + self.drop3(self.fused_attn(f1, f1, f1, m))
-        f2 = self.norm4(f)
-        f = f + self.drop4(self.feed_forward(f2))
+        residual_f = f
+        f = self.norm3(f)
+        f = residual_f + self.drop3(self.fused_attn(f, f, f, m))
+        residual_f = f
+        f = self.norm4(f)
+        f = residual_f + self.drop4(self.feed_forward(f))
 
         out = self.norm(f)[:, 0]
         out = self.head(out)
