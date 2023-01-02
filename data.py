@@ -69,7 +69,8 @@ def gen_dataset(rate, keep):
             dataset[fold].append((a, v, label_index[label]))
 
     for fold in dataset.keys():
-        with open(os.path.join(data_dir, fold+str(rate)+'.pickle'), 'wb') as handle:
+        k = 'k' if keep else ''
+        with open(os.path.join(data_dir, '{}_{}{}.pickle'.format(fold, k, str(rate))), 'wb') as handle:
             pickle.dump(dataset[fold], handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 if __name__=="__main__":

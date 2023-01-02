@@ -193,3 +193,38 @@ def normalize_digraph(A):
     norm_degs_matrix = norm_degs_matrix.view(1, n, n) * degs_inv_sqrt.view(b, n, 1)
     norm_A = torch.bmm(torch.bmm(norm_degs_matrix,A),norm_degs_matrix)
     return norm_A
+
+def append_entry_df(df, entry):
+    val_loss, val_f1, val_recall, val_precision, val_acc, val_matrix = entry
+    df['val_loss'].append(val_loss)
+    df['val_f1'].append(val_f1)
+    df['val_acc'].append(val_acc)
+    df['val_recall'].append(val_recall)
+    df['val_precision'].append(val_precision)
+    df['val_tn'].append(val_matrix[0][0])
+    df['val_fp'].append(val_matrix[0][1])
+    df['val_fn'].append(val_matrix[1][0])
+    df['val_tp'].append(val_matrix[1][1])
+    return df
+
+def create_new_df():
+    df =  {}
+    df['val_loss'] = []
+    df['val_f1'] = []
+    df['val_recall'] = []
+    df['val_precision'] = []
+    df['val_acc'] = []
+    df['val_tn'] = []
+    df['val_fp'] = []
+    df['val_fn'] = []
+    df['val_tp'] = []
+    return df
+
+def print_eval_info(description, eval_return):
+    val_loss, val_f1, val_recall, val_precision, val_acc, val_matrix = eval_return
+    print('{}: {:.5f},{:.5f},{:.5f},{:.5f},{:.5f}'.format(description, val_loss, val_acc, val_recall, val_precision, val_f1))
+    print('Confusion matrix {} {} {} {}'
+            .format(val_matrix[0][0],
+                    val_matrix[0][1],
+                    val_matrix[1][0],
+                    val_matrix[1][1]))

@@ -115,9 +115,9 @@ class AblationModel(nn.Module):
     def __init__(self, video_dimension, audio_dimension, fused_dimension, config_num):
         super().__init__()
         feed_forward = 256
-        dropout = 0.2
-        num_layers = 1
-        num_heads = 1
+        dropout = 0.1
+        num_layers = 4
+        num_heads = 4
 
         self.audio_prj = get_projection(audio_dimension, fused_dimension, 'minimal')
         self.video_prj = get_projection(video_dimension, fused_dimension, 'minimal')
@@ -145,9 +145,6 @@ class AblationModel(nn.Module):
         self.vdrop1 = nn.Dropout(dropout)
         self.vdrop2 = nn.Dropout(dropout)
         self.vnorm3 = LayerNorm(fused_dimension)
-
-        self.audio_enc = Encoder(fused_dimension, num_heads, feed_forward, dropout, num_layers)
-        self.video_enc = Encoder(fused_dimension, num_heads, feed_forward, dropout, num_layers)
 
         self.audio_attn = MultiHeadedAttention(num_heads, fused_dimension)
         self.video_attn = MultiHeadedAttention(num_heads, fused_dimension)
