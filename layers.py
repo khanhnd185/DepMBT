@@ -121,6 +121,8 @@ class GAP(nn.Module):
 def get_projection(input_dim, output_dim, projection_type):
     if projection_type == 'minimal':
         return nn.Linear(input_dim, output_dim)
+    if projection_type == 'conv1d':
+        return nn.Conv1d(input_dim, output_dim, kernel_size=1, padding=0, bias=False)
     if projection_type == 'gated':
         return GatedEmbeddingUnit(input_dim, output_dim)
     elif projection_type == '':

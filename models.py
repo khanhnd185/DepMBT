@@ -112,15 +112,16 @@ class PassThroughAttention(nn.Module):
         return q
 
 class AblationModel(nn.Module):
-    def __init__(self, video_dimension, audio_dimension, fused_dimension, config_num):
+    def __init__(self, video_dimension, audio_dimension, fused_dimension, config_num, project_type='minimal'):
         super().__init__()
         feed_forward = 256
         dropout = 0.1
         num_layers = 4
         num_heads = 4
 
-        self.audio_prj = get_projection(audio_dimension, fused_dimension, 'minimal')
-        self.video_prj = get_projection(video_dimension, fused_dimension, 'minimal')
+        self.project_type_conv1d = (project_type == 'conv1d')
+        self.audio_prj = get_projection(audio_dimension, fused_dimension, project_type)
+        self.video_prj = get_projection(video_dimension, fused_dimension, project_type)
 
         self.enable_self_attention = config_num % 2
         self.enable_cross_attention = (config_num // 2) % 2
@@ -167,8 +168,13 @@ class AblationModel(nn.Module):
 
     def forward(self, a, v, m):
         B = a.shape[0]
-        a = self.audio_prj(a)
-        v = self.video_prj(v)
+        if self.project_type_conv1d:
+            a = self.audio_prj(a.transpose(1, 2)).transpose(1, 2)
+            v = self.video_prj(v.transpose(1, 2)).transpose(1, 2)
+        else:
+            a = self.audio_prj(a)
+            v = self.video_prj(v)
+
         if self.enable_self_attention:
             residual = a
             a = self.anorm1(a)

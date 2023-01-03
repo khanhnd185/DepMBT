@@ -121,7 +121,8 @@ def main():
 
     parser.add_argument('--config', '-c', type=int, default=7, help='Config number')
     parser.add_argument('--batch', '-b', type=int, default=16, help='Batch size')
-    parser.add_argument('--rate', '-R', default='2', help='Batch size')
+    parser.add_argument('--rate', '-R', default='2', help='Rate')
+    parser.add_argument('--project', '-p', default='minimal', help='projection type')
     parser.add_argument('--epoch', '-e', type=int, default=10, help='Number of epoches')
     parser.add_argument('--lr', '-a', type=float, default=0.00001, help='Learning rate')
     parser.add_argument('--datadir', '-d', default='../../../Data/DVlog/', help='Data folder path')
@@ -140,7 +141,7 @@ def main():
     trainldr = DataLoader(trainset, batch_size=args.batch, collate_fn=collate_fn, shuffle=True, num_workers=0)
     validldr = DataLoader(validset, batch_size=args.batch, collate_fn=collate_fn, shuffle=False, num_workers=0)
 
-    net = AblationModel(136, 25, 256, args.config)
+    net = AblationModel(136, 25, 256, args.config, project_type=args.project)
     net = nn.DataParallel(net).cuda()
 
     if args.sam:
