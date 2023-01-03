@@ -175,7 +175,7 @@ def main():
         if val_acc >= best_acc:
             checkpoint = {'state_dict': net.state_dict()}
             torch.save(checkpoint, os.path.join('results', output_dir, 'best_val_acc.pth'))
-            best_acc = val_f1
+            best_acc = val_acc
             best_acc_model = deepcopy(net)
 
         df = append_entry_df(df, eval_return)

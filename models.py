@@ -148,8 +148,10 @@ class AblationModel(nn.Module):
 
         self.audio_attn = MultiHeadedAttention(num_heads, fused_dimension)
         self.video_attn = MultiHeadedAttention(num_heads, fused_dimension)
-        self.norm1 = LayerNorm(fused_dimension)
-        self.norm2 = LayerNorm(fused_dimension)
+        self.aanorm = LayerNorm(fused_dimension)
+        self.vvnorm = LayerNorm(fused_dimension)
+        self.avnorm = LayerNorm(fused_dimension)
+        self.vanorm = LayerNorm(fused_dimension)
         self.drop1 = nn.Dropout(dropout)
         self.drop2 = nn.Dropout(dropout)
 
@@ -183,12 +185,12 @@ class AblationModel(nn.Module):
             v = residual + self.vdrop2(self.vfeed_forward(v))
 
         if self.enable_cross_attention:
-            residual_a = a
-            residual_v = v
-            a = self.norm1(a)
-            v = self.norm2(v)
-            a = residual_a + self.drop1(self.audio_attn(a, v, v, m))
-            v = residual_v + self.drop2(self.video_attn(v, a, a, m))
+            aa = self.aanorm(a)
+            vv = self.vvnorm(v)
+            av = self.avnorm(a)
+            va = self.vanorm(v)
+            a = a + self.drop1(self.audio_attn(aa, va, va, m))
+            v = v + self.drop2(self.video_attn(vv, av, av, m))
 
         f = torch.cat((a, v), dim=2)
         cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
