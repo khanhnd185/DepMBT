@@ -112,13 +112,14 @@ class PassThroughAttention(nn.Module):
         return q
 
 class AblationModel(nn.Module):
-    def __init__(self, video_dimension, audio_dimension, fused_dimension, config_num, project_type='minimal'):
+    def __init__(self, video_dimension, audio_dimension, fused_dimension, config_num, project_type='conv1d', pre_norm=False):
         super().__init__()
         feed_forward = 256
         dropout = 0.1
         num_layers = 4
         num_heads = 4
 
+        self.pre_norm = pre_norm
         self.project_type_conv1d = (project_type == 'conv1d')
         self.audio_prj = get_projection(audio_dimension, fused_dimension, project_type)
         self.video_prj = get_projection(video_dimension, fused_dimension, project_type)
@@ -131,40 +132,45 @@ class AblationModel(nn.Module):
         self.mask_appnd = nn.Parameter(torch.ones(1, 1))
         trunc_normal_(self.cls_token, std=.02)
 
+        norms = []
+        norms.append(LayerNorm(fused_dimension))
+        norms.append(LayerNorm(fused_dimension))
+        norms.append(LayerNorm(fused_dimension))
+        norms.append(LayerNorm(fused_dimension))
+        norms.append(LayerNorm(fused_dimension))
+        norms.append(LayerNorm(fused_dimension))
+        norms.append(LayerNorm(fused_dimension*2))
+        norms.append(LayerNorm(fused_dimension*2))
+        self.norms = nn.ModuleList(norms)
+
         self.aself_attn = MultiHeadedAttention(num_heads, fused_dimension)
         self.afeed_forward = PositionwiseFeedForward(fused_dimension, feed_forward, dropout)
-        self.anorm1 = LayerNorm(fused_dimension)
-        self.anorm2 = LayerNorm(fused_dimension)
         self.adrop1 = nn.Dropout(dropout)
         self.adrop2 = nn.Dropout(dropout)
-        self.anorm3 = LayerNorm(fused_dimension)
 
         self.vself_attn = MultiHeadedAttention(num_heads, fused_dimension)
         self.vfeed_forward = PositionwiseFeedForward(fused_dimension, feed_forward, dropout)
-        self.vnorm1 = LayerNorm(fused_dimension)
-        self.vnorm2 = LayerNorm(fused_dimension)
         self.vdrop1 = nn.Dropout(dropout)
         self.vdrop2 = nn.Dropout(dropout)
-        self.vnorm3 = LayerNorm(fused_dimension)
 
         self.audio_attn = MultiHeadedAttention(num_heads, fused_dimension)
         self.video_attn = MultiHeadedAttention(num_heads, fused_dimension)
-        self.aanorm = LayerNorm(fused_dimension)
-        self.vvnorm = LayerNorm(fused_dimension)
-        self.avnorm = LayerNorm(fused_dimension)
-        self.vanorm = LayerNorm(fused_dimension)
         self.drop1 = nn.Dropout(dropout)
         self.drop2 = nn.Dropout(dropout)
 
         self.fused_attn = MultiHeadedAttention(num_heads, fused_dimension*2)
         self.feed_forward = PositionwiseFeedForward(fused_dimension*2, feed_forward, dropout)
-        self.norm3 = LayerNorm(fused_dimension*2)
-        self.norm4 = LayerNorm(fused_dimension*2)
         self.drop3 = nn.Dropout(dropout)
         self.drop4 = nn.Dropout(dropout)
 
-        self.norm = LayerNorm(fused_dimension*2)
         self.head = nn.Linear(fused_dimension*2, 2)
+
+
+    def maybe_normalize(self, i, x, pre):
+        if self.pre_norm == pre:
+            return  self.norms[i](x)
+
+        return x
 
     def forward(self, a, v, m):
         B = a.shape[0]
@@ -177,26 +183,34 @@ class AblationModel(nn.Module):
 
         if self.enable_self_attention:
             residual = a
-            a = self.anorm1(a)
+            a = self.maybe_normalize(0, a, pre=True)
             a = residual + self.adrop1(self.aself_attn(a, a, a, m))
+            a = self.maybe_normalize(0, a, pre=False)
+
             residual = a
-            a = self.anorm2(a)
+            a = self.maybe_normalize(1, a, pre=True)
             a = residual + self.adrop2(self.afeed_forward(a))
+            a = self.maybe_normalize(1, a, pre=False)
 
             residual = v
-            v = self.vnorm1(v)
+            v = self.maybe_normalize(2, v, pre=True)
             v = residual + self.vdrop1(self.vself_attn(v, v, v, m))
+            v = self.maybe_normalize(2, v, pre=False)
+
             residual = v
-            v = self.vnorm2(v)
+            v = self.maybe_normalize(3, v, pre=True)
             v = residual + self.vdrop2(self.vfeed_forward(v))
+            v = self.maybe_normalize(3, v, pre=False)
 
         if self.enable_cross_attention:
-            aa = self.aanorm(a)
-            vv = self.vvnorm(v)
-            av = self.avnorm(a)
-            va = self.vanorm(v)
-            a = a + self.drop1(self.audio_attn(aa, va, va, m))
-            v = v + self.drop2(self.video_attn(vv, av, av, m))
+            residual_a = a
+            residual_v = v
+            a = self.maybe_normalize(4, a, pre=True)
+            v = self.maybe_normalize(5, v, pre=True)
+            a = residual_a + self.drop1(self.audio_attn(a, v, v, m))
+            v = residual_v + self.drop2(self.video_attn(v, a, a, m))
+            a = self.maybe_normalize(4, a, pre=False)
+            v = self.maybe_normalize(5, v, pre=False)
 
         f = torch.cat((a, v), dim=2)
         cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
@@ -205,13 +219,15 @@ class AblationModel(nn.Module):
         f = torch.cat((cls_tokens, f), dim=1)
 
         residual_f = f
-        f = self.norm3(f)
+        f = self.maybe_normalize(6, f, pre=True)
         f = residual_f + self.drop3(self.fused_attn(f, f, f, m))
+        f = self.maybe_normalize(6, f, pre=False)
         residual_f = f
-        f = self.norm4(f)
+        f = self.maybe_normalize(7, f, pre=True)
         f = residual_f + self.drop4(self.feed_forward(f))
+        f = self.maybe_normalize(7, f, pre=False)
 
-        out = self.norm(f)[:, 0]
+        out = f[:, 0]
         out = self.head(out)
 
         return out
