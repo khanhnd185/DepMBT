@@ -109,9 +109,9 @@ def val(net, validldr, criteria):
     all_labels = all_labels.cpu().numpy()
     all_labels, all_y = transform(all_labels, all_y)
 
-    f1 = f1_score(all_labels, all_y)
-    r = recall_score(all_labels, all_y)
-    p = precision_score(all_labels, all_y)
+    f1 = f1_score(all_labels, all_y, average='weighted')
+    r = recall_score(all_labels, all_y, average='weighted')
+    p = precision_score(all_labels, all_y, average='weighted')
     acc = accuracy_score(all_labels, all_y)
     cm = confusion_matrix(all_labels, all_y)
     return (total_losses.avg(), f1, r, p, acc, cm)
