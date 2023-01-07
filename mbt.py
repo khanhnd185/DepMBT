@@ -80,7 +80,7 @@ class MBT(nn.Module):
 
         a = self.norma(a)
         v = self.normv(v)
-        out = torch.cat((a[:, 0], v[:, 0]), dim=-1)
-        out = self.head(out)
+        out = torch.cat((a[:, :1, :], v[:, :1, :]), dim=1)
+        out = self.head(out).mean(dim=1)
 
         return out
