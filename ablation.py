@@ -7,6 +7,7 @@ from tqdm import tqdm
 from data import DVlog, collate_fn
 from sam import SAM
 from helpers import *
+from mbt import MBT
 from models import AblationModel
 from torch.utils.data import DataLoader
 from sklearn.metrics import recall_score, precision_score, accuracy_score, confusion_matrix
@@ -119,10 +120,11 @@ def val(net, validldr, criteria):
 def main():
     parser = argparse.ArgumentParser(description='Train task seperately')
 
+    parser.add_argument('--net', '-n', default='mbt', help='Net name')
     parser.add_argument('--config', '-c', type=int, default=7, help='Config number')
     parser.add_argument('--batch', '-b', type=int, default=16, help='Batch size')
-    parser.add_argument('--rate', '-R', default='2', help='Rate')
-    parser.add_argument('--project', '-p', default='conv1d', help='projection type')
+    parser.add_argument('--rate', '-R', default='4', help='Rate')
+    parser.add_argument('--project', '-p', default='minimal', help='projection type')
     parser.add_argument('--epoch', '-e', type=int, default=10, help='Number of epoches')
     parser.add_argument('--lr', '-a', type=float, default=0.00001, help='Learning rate')
     parser.add_argument('--datadir', '-d', default='../../../Data/DVlog/', help='Data folder path')
@@ -132,7 +134,7 @@ def main():
 
     args = parser.parse_args()
     keep = 'k' if args.keep else ''
-    output_dir = 'ablation{}_{}{}'.format(str(args.config), keep, args.rate)
+    output_dir = '{}{}_{}{}'.format(args.net, str(args.config), keep, args.rate)
 
     train_criteria = nn.CrossEntropyLoss()
     valid_criteria = nn.CrossEntropyLoss()
@@ -142,7 +144,10 @@ def main():
     trainldr = DataLoader(trainset, batch_size=args.batch, collate_fn=collate_fn, shuffle=True, num_workers=0)
     validldr = DataLoader(validset, batch_size=args.batch, collate_fn=collate_fn, shuffle=False, num_workers=0)
 
-    net = AblationModel(136, 25, 256, args.config, project_type=args.project, pre_norm=args.prenorm)
+    if args.net == 'mbt':
+        net = MBT(136, 25 , 256)
+    else:
+        net = AblationModel(136, 25, 256, args.config, project_type=args.project, pre_norm=args.prenorm)
     net = nn.DataParallel(net).cuda()
 
     if args.sam:
