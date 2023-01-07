@@ -30,7 +30,7 @@ class MBT(nn.Module):
 
         self.norma = LayerNorm(layer.size)
         self.normv = LayerNorm(layer.size)
-        self.head = nn.Linear(embed_dim*2, num_class)
+        self.head = nn.Linear(embed_dim, num_class)
 
         trunc_normal_(self.bot_token, std=.02)
         trunc_normal_(self.acls_token, std=.02)
