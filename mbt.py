@@ -6,7 +6,7 @@ from annotated_transformer import Encoder, EncoderLayer, clones, LayerNorm
 from layers import get_projection
 
 class MBT(nn.Module):
-    def __init__(self, v_dim, a_dim, embed_dim, num_bottle_token=2, bottle_layer=1
+    def __init__(self, v_dim, a_dim, embed_dim, num_bottle_token=4, bottle_layer=1
                 , project_type='minimal', num_head=4, drop=.1, num_layers=4, num_class=2):
         super().__init__()
         self.num_layers = num_layers
