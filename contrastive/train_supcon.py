@@ -46,17 +46,16 @@ def main():
     parser.add_argument('--config', '-c', type=int, default=7, help='Config number')
     parser.add_argument('--batch', '-b', type=int, default=8, help='Batch size')
     parser.add_argument('--rate', '-R', default='4', help='Rate')
+    parser.add_argument('--opt', '-o', default='adam', help='Optimizer')
     parser.add_argument('--project', '-p', default='minimal', help='projection type')
     parser.add_argument('--epoch', '-e', type=int, default=10, help='Number of epoches')
     parser.add_argument('--temp', '-t', type=float, default=0.1, help='Temperature')
     parser.add_argument('--lr', '-a', type=float, default=0.00003, help='Learning rate')
     parser.add_argument('--datadir', '-d', default='../../../../Data/DVlog/', help='Data folder path')
     parser.add_argument('--prenorm', '-P', action='store_true', help='Pre-norm')
-    parser.add_argument('--keep', '-', action='store_true', help='Keep all data in training set')
 
     args = parser.parse_args()
-    keep = 'k' if args.keep else ''
-    output_dir = 'SupConMBT{}_{}{}'.format(str(args.config), keep, args.rate)
+    output_dir = 'SupConMBT{}_{}'.format(str(args.config), args.rate)
 
     train_criteria = SupConLoss(temperature=args.temp)
 
@@ -66,7 +65,10 @@ def main():
     net = SupConMBT(136, 25 , 256)
     net = nn.DataParallel(net).cuda()
 
-    optimizer = torch.optim.AdamW(net.parameters(), betas=(0.9, 0.999), lr=args.lr, weight_decay=1.0/args.batch)
+    if args.opt == 'SGD':
+        optimizer = torch.optim.SGD(net.parameters(), momentum=0.9, lr=args.lr, weight_decay=0.5/args.batch)
+    else:
+        optimizer = torch.optim.AdamW(net.parameters(), betas=(0.9, 0.999), lr=args.lr, weight_decay=0.5/args.batch)
 
     df = create_new_df()
 

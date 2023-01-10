@@ -3,6 +3,7 @@ import os
 import torch
 import pandas
 import argparse
+from sam import SAM
 from tqdm import tqdm
 from dataset import DVlog, collate_fn
 from utils import *
@@ -38,6 +39,37 @@ def train(net, classifier, trainldr, optimizer, epoch, epochs, learning_rate, cr
 
         total_losses.update(loss.data.item(), feature_audio.size(0))
     return total_losses.avg()
+
+def train_sam(net, classifier, trainldr, optimizer, epoch, epochs, learning_rate, criteria):
+    total_losses = AverageMeter()
+    net.eval()
+    classifier.train()
+
+    train_loader_len = len(trainldr)
+    for batch_idx, data in enumerate(tqdm(trainldr)):
+        feature_audio, feature_video, mask, labels = data
+
+        # adjust_learning_rate(optimizer, epoch, epochs, learning_rate, batch_idx, train_loader_len)
+        feature_audio = feature_audio.cuda()
+        feature_video = feature_video.cuda()
+        mask = mask.cuda()
+        #labels = labels.float()
+        labels = labels.cuda()
+
+        with torch.no_grad():
+            features = net.encoder(feature_audio, feature_video, mask)
+        output = classifier(features.detach())
+        loss = criteria(output, labels)
+        loss.backward()
+        optimizer.first_step(zero_grad=True)
+
+        output = classifier(features.detach())
+        criteria(output, labels).backward()
+        optimizer.second_step(zero_grad=True)
+
+        total_losses.update(loss.data.item(), feature_audio.size(0))
+    return total_losses.avg()
+
 
 def transform(y, yhat):
     i = np.argmax(yhat, axis=1)
@@ -99,11 +131,12 @@ def val(net, classifier, validldr, criteria):
 def main():
     parser = argparse.ArgumentParser(description='Train task seperately')
 
-    parser.add_argument('--net', '-n', default='SupConLinear', help='Net name')
+    parser.add_argument('--net', '-n', default='linear', help='Net name')
     parser.add_argument('--input', '-i', default='results/SupConMBT7_4/latest.pth', help='Input file')
     parser.add_argument('--config', '-c', type=int, default=7, help='Config number')
     parser.add_argument('--batch', '-b', type=int, default=32, help='Batch size')
     parser.add_argument('--rate', '-R', default='4', help='Rate')
+    parser.add_argument('--opt', '-o', default='adam', help='Optimizer')
     parser.add_argument('--project', '-p', default='minimal', help='projection type')
     parser.add_argument('--epoch', '-e', type=int, default=10, help='Number of epoches')
     parser.add_argument('--lr', '-a', type=float, default=0.00001, help='Learning rate')
@@ -114,7 +147,7 @@ def main():
 
     args = parser.parse_args()
     keep = 'k' if args.keep else ''
-    output_dir = '{}{}_{}{}'.format(args.net, str(args.config), keep, args.rate)
+    output_dir = 'SupConHead-{}-{}{}'.format(args.net, str(args.config), args.rate)
 
     train_criteria = nn.CrossEntropyLoss()
     valid_criteria = nn.CrossEntropyLoss()
@@ -125,7 +158,16 @@ def main():
     validldr = DataLoader(validset, batch_size=args.batch, collate_fn=collate_fn, shuffle=False, num_workers=0)
 
     net = SupConMBT(136, 25 , 256)
-    classifier = nn.Linear(256, 2)
+
+    if args.net == 'mlp':
+        classifier = nn.Sequential(
+                nn.Linear(256, 512),
+                nn.ReLU(inplace=True),
+                nn.Dropout(p=0.2),
+                nn.Linear(512, 2)
+            )
+    else:
+        classifier = nn.Linear(256, 2)
 
     if args.input != '':
         print("Resume form | {} ]".format(args.input))
@@ -134,14 +176,24 @@ def main():
     net = net.cuda()
     classifier = classifier.cuda()
 
-    optimizer = torch.optim.AdamW(classifier.parameters(), betas=(0.9, 0.999), lr=args.lr, weight_decay=1.0/args.batch)
+    if args.sam:
+        base_optimizer = torch.optim.SGD
+        optimizer = SAM(classifier.parameters(), base_optimizer, lr=args.lr, momentum=0.9, weight_decay=1.0/args.batch)
+    else:
+        if args.opt == 'SGD':
+            optimizer = torch.optim.SGD(classifier.parameters(), momentum=0.9, lr=args.lr, weight_decay=1.0/args.batch)
+        else:
+            optimizer = torch.optim.AdamW(classifier.parameters(), betas=(0.9, 0.999), lr=args.lr, weight_decay=1.0/args.batch)
 
     best_f1 = 0.0
     best_acc = 0.0
     df = create_new_df()
 
     for epoch in range(args.epoch):
-        train_loss = train(net, classifier, trainldr, optimizer, epoch, args.epoch, args.lr, train_criteria)
+        if args.sam:
+            train_loss = train_sam(net, classifier, trainldr, optimizer, epoch, args.epoch, args.lr, train_criteria)
+        else:
+            train_loss = train(net, classifier, trainldr, optimizer, epoch, args.epoch, args.lr, train_criteria)
 
         eval_return = val(net, classifier, validldr, valid_criteria)
         _, val_f1, _, _, val_acc, _ = eval_return
