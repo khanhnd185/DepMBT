@@ -110,7 +110,7 @@ class SupConMBT(nn.Module):
             raise NotImplementedError(
                 'head not supported: {}'.format(head))
 
-    def forward(self, x):
-        feat = self.encoder(x)
+    def forward(self, a, v, m):
+        feat = self.encoder(a, v, m)
         feat = F.normalize(self.head(feat), dim=1)
         return feat

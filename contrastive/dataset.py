@@ -21,6 +21,25 @@ def collate_fn(data):
     return feature_audio.float(), feature_video.float(), mask.long(), labels
 
 
+def multiview_collate_fn(data):
+    audio, video, labels, lengths = zip(*data)
+    labels = torch.tensor(labels).long()
+    lengths = lengths + lengths
+    lengths = torch.tensor(lengths).long()
+    mask = torch.arange(max(lengths))[None, :] < lengths[:, None]
+
+    feature_audio = []
+    feature_video = []
+
+    for i in range(2):
+        feature_audio.append([torch.tensor(a[i]).long() for a in audio])
+        feature_video.append([torch.tensor(v[i]).long() for v in video])
+        feature_audio[i] = pad_sequence(feature_audio[i], batch_first=True, padding_value=0).float()
+        feature_video[i] = pad_sequence(feature_video[i], batch_first=True, padding_value=0).float()
+
+    return feature_audio, feature_video, mask.long(), labels
+
+
 class DVlog(Dataset):
     def __init__(self, filename):
         super(DVlog, self).__init__()
@@ -36,6 +55,65 @@ class DVlog(Dataset):
     def __getitem__(self, idx):
         return self.dataset[idx][0], self.dataset[idx][1], self.dataset[idx][2], self.length[idx]
 
+
+class MultiViewDVlog(Dataset):
+    def __init__(self, filename):
+        super(MultiViewDVlog, self).__init__()
+
+        with open(filename, 'rb') as handle:
+            self.dataset = pickle.load(handle)
+
+        self.length = [d[0][0].shape[0] for d in self.dataset]
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        return self.dataset[idx][0], self.dataset[idx][1], self.dataset[idx][2], self.length[idx]
+
+def trim(a, v):
+    leng = min(a.shape[0], v.shape[0])
+    return a[:leng, :], v[:leng, :]
+
+def gen_multiview_dataset(rate):
+    data_dir = '../../../../Data/DVlog/'
+    feat_dir = os.path.join(data_dir, 'dvlog-dataset')
+    label_file = os.path.join(feat_dir, 'labels.csv')
+    label_index = {"depression": 1, "normal": 0}
+
+    dataset = []
+
+    with open(label_file, 'r', encoding='utf-8') as f:
+        data_file = f.readlines()[1:]
+
+    for i, data in tqdm(enumerate(data_file)):
+        index, label, duration, gender, fold = data.strip().split(',')
+
+        if fold != 'train':
+            continue
+
+        audio = np.load(os.path.join(feat_dir, index, index+'_acoustic.npy'))
+        visual = np.load(os.path.join(feat_dir, index, index+'_visual.npy'))
+        audio, visual = trim(audio, visual)
+
+        au = []
+        vi = []
+        for j in range(rate):
+            a = audio[j::rate, :]
+            v = visual[j::rate, :]
+
+            au.append(a)
+            vi.append(v)
+            # Default view is 2
+            if (j % 2) == 1:
+                au = trim(au[0], au[1])
+                vi = trim(vi[0], vi[1])
+                dataset.append((au, vi, label_index[label]))
+                au = []
+                vi = []
+
+    with open(os.path.join(data_dir, 'MultiViewTrain_{}.pickle'.format(str(rate))), 'wb') as handle:
+        pickle.dump(dataset, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 def gen_dataset(rate, keep):
     data_dir = '../../../Data/DVlog/'
@@ -73,10 +151,16 @@ def gen_dataset(rate, keep):
         with open(os.path.join(data_dir, '{}_{}{}.pickle'.format(fold, k, str(rate))), 'wb') as handle:
             pickle.dump(dataset[fold], handle, protocol=pickle.HIGHEST_PROTOCOL)
 
+
 if __name__=="__main__":
     import argparse
     parser = argparse.ArgumentParser(description='Generate dataset')
-    parser.add_argument('--rate', '-r', type=int, default=1, help='Downsample rate')
+    parser.add_argument('--rate', '-r', type=int, default=4, help='Downsample rate divisible by 2')
     parser.add_argument('--keep', '-', action='store_true', help='Keep all data in training set')
+    parser.add_argument('--multiview', '-', action='store_true', help='Multiview dataset')
     args = parser.parse_args()
-    gen_dataset(args.rate, args.keep)
+
+    if args.multiview:
+        gen_multiview_dataset(args.rate)
+    else:
+        gen_dataset(args.rate, args.keep)

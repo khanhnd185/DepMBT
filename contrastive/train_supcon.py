@@ -4,7 +4,7 @@ import torch
 import pandas
 import argparse
 from tqdm import tqdm
-from dataset import DVlog, collate_fn
+from dataset import MultiViewDVlog, multiview_collate_fn
 from loss import SupConLoss
 from utils import *
 from model import SupConMBT
@@ -17,6 +17,9 @@ def train(net, trainldr, optimizer, epoch, epochs, learning_rate, criteria):
     train_loader_len = len(trainldr)
     for batch_idx, data in enumerate(tqdm(trainldr)):
         feature_audio, feature_video, mask, labels = data
+        feature_audio = torch.cat([feature_audio[0], feature_audio[1]], dim=0)
+        feature_video = torch.cat([feature_video[0], feature_video[1]], dim=0)
+        bsz = labels.shape[0]
 
         # adjust_learning_rate(optimizer, epoch, epochs, learning_rate, batch_idx, train_loader_len)
         feature_audio = feature_audio.cuda()
@@ -24,10 +27,13 @@ def train(net, trainldr, optimizer, epoch, epochs, learning_rate, criteria):
         mask = mask.cuda()
         #labels = labels.float()
         labels = labels.cuda()
-        optimizer.zero_grad()
 
-        y = net(feature_audio, feature_video, mask)
-        loss = criteria(y, labels)
+        features = net(feature_audio, feature_video, mask)
+        f1, f2 = torch.split(features, [bsz, bsz], dim=0)
+        features = torch.cat([f1.unsqueeze(1), f2.unsqueeze(1)], dim=1)
+        loss = criteria(features, labels)
+
+        optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
@@ -38,13 +44,13 @@ def main():
     parser = argparse.ArgumentParser(description='Train task seperately')
 
     parser.add_argument('--config', '-c', type=int, default=7, help='Config number')
-    parser.add_argument('--batch', '-b', type=int, default=16, help='Batch size')
+    parser.add_argument('--batch', '-b', type=int, default=8, help='Batch size')
     parser.add_argument('--rate', '-R', default='4', help='Rate')
     parser.add_argument('--project', '-p', default='minimal', help='projection type')
     parser.add_argument('--epoch', '-e', type=int, default=10, help='Number of epoches')
     parser.add_argument('--temp', '-t', type=float, default=0.1, help='Temperature')
     parser.add_argument('--lr', '-a', type=float, default=0.00001, help='Learning rate')
-    parser.add_argument('--datadir', '-d', default='../../../Data/DVlog/', help='Data folder path')
+    parser.add_argument('--datadir', '-d', default='../../../../Data/DVlog/', help='Data folder path')
     parser.add_argument('--prenorm', '-P', action='store_true', help='Pre-norm')
     parser.add_argument('--keep', '-', action='store_true', help='Keep all data in training set')
 
@@ -54,8 +60,8 @@ def main():
 
     train_criteria = SupConLoss(temperature=args.temp)
 
-    trainset = DVlog('{}train_{}{}.pickle'.format(args.datadir, keep, args.rate))
-    trainldr = DataLoader(trainset, batch_size=args.batch, collate_fn=collate_fn, shuffle=True, num_workers=0)
+    trainset = MultiViewDVlog('{}MultiViewTrain_{}.pickle'.format(args.datadir, args.rate))
+    trainldr = DataLoader(trainset, batch_size=args.batch, collate_fn=multiview_collate_fn, shuffle=True, num_workers=0)
 
     net = SupConMBT(136, 25 , 256)
     net = nn.DataParallel(net).cuda()
@@ -69,6 +75,7 @@ def main():
         print("Epoch {:2d} | Rate {} | Trainloss {:.5f}:".format(epoch, args.rate, train_loss))
 
 
+    os.makedirs(os.path.join('results', output_dir), exist_ok = True)
     torch.save({'state_dict': net.state_dict()}, os.path.join('results', output_dir, 'latest.pth'))
 
 
