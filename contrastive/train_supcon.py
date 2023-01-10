@@ -49,7 +49,7 @@ def main():
     parser.add_argument('--project', '-p', default='minimal', help='projection type')
     parser.add_argument('--epoch', '-e', type=int, default=10, help='Number of epoches')
     parser.add_argument('--temp', '-t', type=float, default=0.1, help='Temperature')
-    parser.add_argument('--lr', '-a', type=float, default=0.00001, help='Learning rate')
+    parser.add_argument('--lr', '-a', type=float, default=0.00003, help='Learning rate')
     parser.add_argument('--datadir', '-d', default='../../../../Data/DVlog/', help='Data folder path')
     parser.add_argument('--prenorm', '-P', action='store_true', help='Pre-norm')
     parser.add_argument('--keep', '-', action='store_true', help='Keep all data in training set')

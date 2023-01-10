@@ -1,261 +1,192 @@
-from __future__ import print_function
-
-import sys
-import argparse
-import time
-import math
-
+from copy import deepcopy
+import os
 import torch
-import torch.backends.cudnn as cudnn
-
-from main_ce import set_loader
-from util import AverageMeter
-from util import adjust_learning_rate, warmup_learning_rate, accuracy
-from util import set_optimizer
-from networks.resnet_big import SupConResNet, LinearClassifier
-
-try:
-    import apex
-    from apex import amp, optimizers
-except ImportError:
-    pass
+import pandas
+import argparse
+from tqdm import tqdm
+from dataset import DVlog, collate_fn
+from utils import *
+from model import SupConMBT
+from torch.utils.data import DataLoader
+from sklearn.metrics import recall_score, precision_score, accuracy_score, confusion_matrix
 
 
-def parse_option():
-    parser = argparse.ArgumentParser('argument for training')
-
-    parser.add_argument('--print_freq', type=int, default=10,
-                        help='print frequency')
-    parser.add_argument('--save_freq', type=int, default=50,
-                        help='save frequency')
-    parser.add_argument('--batch_size', type=int, default=256,
-                        help='batch_size')
-    parser.add_argument('--num_workers', type=int, default=16,
-                        help='num of workers to use')
-    parser.add_argument('--epochs', type=int, default=100,
-                        help='number of training epochs')
-
-    # optimization
-    parser.add_argument('--learning_rate', type=float, default=0.1,
-                        help='learning rate')
-    parser.add_argument('--lr_decay_epochs', type=str, default='60,75,90',
-                        help='where to decay lr, can be a list')
-    parser.add_argument('--lr_decay_rate', type=float, default=0.2,
-                        help='decay rate for learning rate')
-    parser.add_argument('--weight_decay', type=float, default=0,
-                        help='weight decay')
-    parser.add_argument('--momentum', type=float, default=0.9,
-                        help='momentum')
-
-    # model dataset
-    parser.add_argument('--model', type=str, default='resnet50')
-    parser.add_argument('--dataset', type=str, default='cifar10',
-                        choices=['cifar10', 'cifar100'], help='dataset')
-
-    # other setting
-    parser.add_argument('--cosine', action='store_true',
-                        help='using cosine annealing')
-    parser.add_argument('--warm', action='store_true',
-                        help='warm-up for large batch training')
-
-    parser.add_argument('--ckpt', type=str, default='',
-                        help='path to pre-trained model')
-
-    opt = parser.parse_args()
-
-    # set the path according to the environment
-    opt.data_folder = './datasets/'
-
-    iterations = opt.lr_decay_epochs.split(',')
-    opt.lr_decay_epochs = list([])
-    for it in iterations:
-        opt.lr_decay_epochs.append(int(it))
-
-    opt.model_name = '{}_{}_lr_{}_decay_{}_bsz_{}'.\
-        format(opt.dataset, opt.model, opt.learning_rate, opt.weight_decay,
-               opt.batch_size)
-
-    if opt.cosine:
-        opt.model_name = '{}_cosine'.format(opt.model_name)
-
-    # warm-up for large-batch training,
-    if opt.warm:
-        opt.model_name = '{}_warm'.format(opt.model_name)
-        opt.warmup_from = 0.01
-        opt.warm_epochs = 10
-        if opt.cosine:
-            eta_min = opt.learning_rate * (opt.lr_decay_rate ** 3)
-            opt.warmup_to = eta_min + (opt.learning_rate - eta_min) * (
-                    1 + math.cos(math.pi * opt.warm_epochs / opt.epochs)) / 2
-        else:
-            opt.warmup_to = opt.learning_rate
-
-    if opt.dataset == 'cifar10':
-        opt.n_cls = 10
-    elif opt.dataset == 'cifar100':
-        opt.n_cls = 100
-    else:
-        raise ValueError('dataset not supported: {}'.format(opt.dataset))
-
-    return opt
-
-
-def set_model(opt):
-    model = SupConResNet(name=opt.model)
-    criterion = torch.nn.CrossEntropyLoss()
-
-    classifier = LinearClassifier(name=opt.model, num_classes=opt.n_cls)
-
-    ckpt = torch.load(opt.ckpt, map_location='cpu')
-    state_dict = ckpt['model']
-
-    if torch.cuda.is_available():
-        if torch.cuda.device_count() > 1:
-            model.encoder = torch.nn.DataParallel(model.encoder)
-        else:
-            new_state_dict = {}
-            for k, v in state_dict.items():
-                k = k.replace("module.", "")
-                new_state_dict[k] = v
-            state_dict = new_state_dict
-        model = model.cuda()
-        classifier = classifier.cuda()
-        criterion = criterion.cuda()
-        cudnn.benchmark = True
-
-        model.load_state_dict(state_dict)
-
-    return model, classifier, criterion
-
-
-def train(train_loader, model, classifier, criterion, optimizer, epoch, opt):
-    """one epoch training"""
-    model.eval()
+def train(net, classifier, trainldr, optimizer, epoch, epochs, learning_rate, criteria):
+    total_losses = AverageMeter()
+    net.eval()
     classifier.train()
 
-    batch_time = AverageMeter()
-    data_time = AverageMeter()
-    losses = AverageMeter()
-    top1 = AverageMeter()
+    train_loader_len = len(trainldr)
+    for batch_idx, data in enumerate(tqdm(trainldr)):
+        feature_audio, feature_video, mask, labels = data
 
-    end = time.time()
-    for idx, (images, labels) in enumerate(train_loader):
-        data_time.update(time.time() - end)
+        # adjust_learning_rate(optimizer, epoch, epochs, learning_rate, batch_idx, train_loader_len)
+        feature_audio = feature_audio.cuda()
+        feature_video = feature_video.cuda()
+        mask = mask.cuda()
+        #labels = labels.float()
+        labels = labels.cuda()
 
-        images = images.cuda(non_blocking=True)
-        labels = labels.cuda(non_blocking=True)
-        bsz = labels.shape[0]
-
-        # warm-up learning rate
-        warmup_learning_rate(opt, epoch, idx, len(train_loader), optimizer)
-
-        # compute loss
         with torch.no_grad():
-            features = model.encoder(images)
+            features = net.encoder(feature_audio, feature_video, mask)
         output = classifier(features.detach())
-        loss = criterion(output, labels)
+        loss = criteria(output, labels)
 
-        # update metric
-        losses.update(loss.item(), bsz)
-        acc1, acc5 = accuracy(output, labels, topk=(1, 5))
-        top1.update(acc1[0], bsz)
-
-        # SGD
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-        # measure elapsed time
-        batch_time.update(time.time() - end)
-        end = time.time()
+        total_losses.update(loss.data.item(), feature_audio.size(0))
+    return total_losses.avg()
 
-        # print info
-        if (idx + 1) % opt.print_freq == 0:
-            print('Train: [{0}][{1}/{2}]\t'
-                  'BT {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                  'DT {data_time.val:.3f} ({data_time.avg:.3f})\t'
-                  'loss {loss.val:.3f} ({loss.avg:.3f})\t'
-                  'Acc@1 {top1.val:.3f} ({top1.avg:.3f})'.format(
-                   epoch, idx + 1, len(train_loader), batch_time=batch_time,
-                   data_time=data_time, loss=losses, top1=top1))
-            sys.stdout.flush()
+def transform(y, yhat):
+    i = np.argmax(yhat, axis=1)
+    yhat = np.zeros(yhat.shape)
+    yhat[np.arange(len(i)), i] = 1
 
-    return losses.avg, top1.avg
+    if not len(y.shape) == 1:
+        if y.shape[1] == 1:
+            y = y.reshape(-1)
+        else:
+            y = np.argmax(y, axis=-1)
+    if not len(yhat.shape) == 1:
+        if yhat.shape[1] == 1:
+            yhat = yhat.reshape(-1)
+        else:
+            yhat = np.argmax(yhat, axis=-1)
 
+    return y, yhat
 
-def validate(val_loader, model, classifier, criterion, opt):
-    """validation"""
-    model.eval()
+def val(net, classifier, validldr, criteria):
+    total_losses = AverageMeter()
+    net.eval()
     classifier.eval()
 
-    batch_time = AverageMeter()
-    losses = AverageMeter()
-    top1 = AverageMeter()
-
-    with torch.no_grad():
-        end = time.time()
-        for idx, (images, labels) in enumerate(val_loader):
-            images = images.float().cuda()
+    all_y = None
+    all_labels = None
+    for batch_idx, data in enumerate(tqdm(validldr)):
+        feature_audio, feature_video, mask, labels = data
+        with torch.no_grad():
+            feature_audio = feature_audio.cuda()
+            feature_video = feature_video.cuda()
+            mask = mask.cuda()
+            #labels = labels.float()
             labels = labels.cuda()
-            bsz = labels.shape[0]
 
-            # forward
-            output = classifier(model.encoder(images))
-            loss = criterion(output, labels)
+            features = net.encoder(feature_audio, feature_video, mask)
+            y = classifier(features.detach())
+            loss = criteria(y, labels)
+            total_losses.update(loss.data.item(), feature_audio.size(0))
 
-            # update metric
-            losses.update(loss.item(), bsz)
-            acc1, acc5 = accuracy(output, labels, topk=(1, 5))
-            top1.update(acc1[0], bsz)
+            if all_y == None:
+                all_y = y.clone()
+                all_labels = labels.clone()
+            else:
+                all_y = torch.cat((all_y, y), 0)
+                all_labels = torch.cat((all_labels, labels), 0)
 
-            # measure elapsed time
-            batch_time.update(time.time() - end)
-            end = time.time()
+    all_y = all_y.cpu().numpy()
+    all_labels = all_labels.cpu().numpy()
+    all_labels, all_y = transform(all_labels, all_y)
 
-            if idx % opt.print_freq == 0:
-                print('Test: [{0}/{1}]\t'
-                      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                      'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                      'Acc@1 {top1.val:.3f} ({top1.avg:.3f})'.format(
-                       idx, len(val_loader), batch_time=batch_time,
-                       loss=losses, top1=top1))
-
-    print(' * Acc@1 {top1.avg:.3f}'.format(top1=top1))
-    return losses.avg, top1.avg
-
+    f1 = f1_score(all_labels, all_y, average='weighted')
+    r = recall_score(all_labels, all_y, average='weighted')
+    p = precision_score(all_labels, all_y, average='weighted')
+    acc = accuracy_score(all_labels, all_y)
+    cm = confusion_matrix(all_labels, all_y)
+    return (total_losses.avg(), f1, r, p, acc, cm)
 
 def main():
-    best_acc = 0
-    opt = parse_option()
+    parser = argparse.ArgumentParser(description='Train task seperately')
 
-    # build data loader
-    train_loader, val_loader = set_loader(opt)
+    parser.add_argument('--net', '-n', default='SupConLinear', help='Net name')
+    parser.add_argument('--input', '-i', default='results/SupConMBT7_4/latest.pth', help='Input file')
+    parser.add_argument('--config', '-c', type=int, default=7, help='Config number')
+    parser.add_argument('--batch', '-b', type=int, default=32, help='Batch size')
+    parser.add_argument('--rate', '-R', default='4', help='Rate')
+    parser.add_argument('--project', '-p', default='minimal', help='projection type')
+    parser.add_argument('--epoch', '-e', type=int, default=10, help='Number of epoches')
+    parser.add_argument('--lr', '-a', type=float, default=0.00001, help='Learning rate')
+    parser.add_argument('--datadir', '-d', default='../../../../Data/DVlog/', help='Data folder path')
+    parser.add_argument('--sam', '-s', action='store_true', help='Apply SAM optimizer')
+    parser.add_argument('--prenorm', '-P', action='store_true', help='Pre-norm')
+    parser.add_argument('--keep', '-', action='store_true', help='Keep all data in training set')
 
-    # build model and criterion
-    model, classifier, criterion = set_model(opt)
+    args = parser.parse_args()
+    keep = 'k' if args.keep else ''
+    output_dir = '{}{}_{}{}'.format(args.net, str(args.config), keep, args.rate)
 
-    # build optimizer
-    optimizer = set_optimizer(opt, classifier)
+    train_criteria = nn.CrossEntropyLoss()
+    valid_criteria = nn.CrossEntropyLoss()
 
-    # training routine
-    for epoch in range(1, opt.epochs + 1):
-        adjust_learning_rate(opt, optimizer, epoch)
+    trainset = DVlog('{}train_{}{}.pickle'.format(args.datadir, keep, args.rate))
+    validset = DVlog('{}valid_{}{}.pickle'.format(args.datadir, keep, args.rate))
+    trainldr = DataLoader(trainset, batch_size=args.batch, collate_fn=collate_fn, shuffle=True, num_workers=0)
+    validldr = DataLoader(validset, batch_size=args.batch, collate_fn=collate_fn, shuffle=False, num_workers=0)
 
-        # train for one epoch
-        time1 = time.time()
-        loss, acc = train(train_loader, model, classifier, criterion,
-                          optimizer, epoch, opt)
-        time2 = time.time()
-        print('Train epoch {}, total time {:.2f}, accuracy:{:.2f}'.format(
-            epoch, time2 - time1, acc))
+    net = SupConMBT(136, 25 , 256)
+    classifier = nn.Linear(256, 2)
 
-        # eval for one epoch
-        loss, val_acc = validate(val_loader, model, classifier, criterion, opt)
-        if val_acc > best_acc:
+    if args.input != '':
+        print("Resume form | {} ]".format(args.input))
+        net = load_state_dict(net, args.input)
+
+    net = net.cuda()
+    classifier = classifier.cuda()
+
+    optimizer = torch.optim.AdamW(classifier.parameters(), betas=(0.9, 0.999), lr=args.lr, weight_decay=1.0/args.batch)
+
+    best_f1 = 0.0
+    best_acc = 0.0
+    df = create_new_df()
+
+    for epoch in range(args.epoch):
+        train_loss = train(net, classifier, trainldr, optimizer, epoch, args.epoch, args.lr, train_criteria)
+
+        eval_return = val(net, classifier, validldr, valid_criteria)
+        _, val_f1, _, _, val_acc, _ = eval_return
+        description = "Epoch {:2d} | Rate {} | Trainloss {:.5f}:".format(epoch, args.rate, train_loss)
+        print_eval_info(description, eval_return)
+
+        os.makedirs(os.path.join('results', output_dir), exist_ok = True)
+
+        if val_f1 >= best_f1:
+            checkpoint = {'state_dict': classifier.state_dict()}
+            torch.save(checkpoint, os.path.join('results', output_dir, 'best_val_f1.pth'))
+            best_f1 = val_f1
+            best_f1_model = deepcopy(classifier)
+
+        if val_acc >= best_acc:
+            checkpoint = {'state_dict': classifier.state_dict()}
+            torch.save(checkpoint, os.path.join('results', output_dir, 'best_val_acc.pth'))
             best_acc = val_acc
+            best_acc_model = deepcopy(classifier)
 
-    print('best accuracy: {:.2f}'.format(best_acc))
+        df = append_entry_df(df, eval_return)
 
 
-if __name__ == '__main__':
+    testset = DVlog('{}test_{}{}.pickle'.format(args.datadir, keep, args.rate))
+    test_criteria = nn.CrossEntropyLoss()
+    testldr = DataLoader(testset, batch_size=args.batch, collate_fn=collate_fn, shuffle=False, num_workers=0)
+
+    best_f1_model = nn.DataParallel(best_f1_model).cuda()
+    eval_return = val(net, best_f1_model, testldr, test_criteria)
+    description = 'Best F1 Testset'
+    print_eval_info(description, eval_return)
+    df = append_entry_df(df, eval_return)
+
+    best_acc_model = nn.DataParallel(best_acc_model).cuda()
+    eval_return = val(net, best_acc_model, testldr, test_criteria)
+    description = 'Best Acc Testset'
+    print_eval_info(description, eval_return)
+    df = append_entry_df(df, eval_return)
+
+
+    df = pandas.DataFrame(df)
+    csv_name = os.path.join('results', output_dir, 'train.csv')
+    df.to_csv(csv_name)
+
+
+if __name__=="__main__":
     main()
+
