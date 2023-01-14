@@ -44,18 +44,19 @@ def main():
     parser = argparse.ArgumentParser(description='Train task seperately')
 
     parser.add_argument('--config', '-c', type=int, default=7, help='Config number')
-    parser.add_argument('--batch', '-b', type=int, default=8, help='Batch size')
+    parser.add_argument('--batch', '-b', type=int, default=32, help='Batch size')
     parser.add_argument('--rate', '-R', default='4', help='Rate')
     parser.add_argument('--opt', '-o', default='adam', help='Optimizer')
     parser.add_argument('--project', '-p', default='minimal', help='projection type')
     parser.add_argument('--epoch', '-e', type=int, default=10, help='Number of epoches')
     parser.add_argument('--temp', '-t', type=float, default=0.1, help='Temperature')
     parser.add_argument('--lr', '-a', type=float, default=0.00003, help='Learning rate')
-    parser.add_argument('--datadir', '-d', default='../../../../Data/DVlog/', help='Data folder path')
+    parser.add_argument('--datadir', '-d', default='../../../Data/DVlog/', help='Data folder path')
     parser.add_argument('--prenorm', '-P', action='store_true', help='Pre-norm')
 
     args = parser.parse_args()
     output_dir = 'SupConMBT{}_{}'.format(str(args.config), args.rate)
+    os.makedirs(os.path.join('results', output_dir), exist_ok = True)
 
     train_criteria = SupConLoss(temperature=args.temp)
 
@@ -71,15 +72,16 @@ def main():
         optimizer = torch.optim.AdamW(net.parameters(), betas=(0.9, 0.999), lr=args.lr, weight_decay=0.5/args.batch)
 
     df = create_new_df()
+    best_loss = 1000.0
 
     for epoch in range(args.epoch):
         train_loss = train(net, trainldr, optimizer, epoch, args.epoch, args.lr, train_criteria)
         print("Epoch {:2d} | Rate {} | Trainloss {:.5f}:".format(epoch, args.rate, train_loss))
 
-
-    os.makedirs(os.path.join('results', output_dir), exist_ok = True)
-    torch.save({'state_dict': net.state_dict()}, os.path.join('results', output_dir, 'latest.pth'))
-
+        if train_loss <= best_loss:
+            checkpoint = {'state_dict': net.state_dict()}
+            torch.save(checkpoint, os.path.join('results', output_dir, 'best.pth'))
+            best_loss = train_loss
 
 
 if __name__=="__main__":

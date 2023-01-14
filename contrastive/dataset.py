@@ -57,11 +57,24 @@ class DVlog(Dataset):
 
 
 class MultiViewDVlog(Dataset):
-    def __init__(self, filename):
+    def __init__(self, filename, maxlen=None):
         super(MultiViewDVlog, self).__init__()
 
         with open(filename, 'rb') as handle:
-            self.dataset = pickle.load(handle)
+            dataset = pickle.load(handle)
+
+        if maxlen == None:
+            self.dataset = dataset
+        else:
+            self.dataset = []
+            for data in dataset:
+                a, v, label = data
+                a[0] = a[0][:maxlen, :]
+                a[1] = a[1][:maxlen, :]
+                v[0] = v[0][:maxlen, :]
+                v[1] = v[1][:maxlen, :]
+
+                self.dataset.append((a, v, label))
 
         self.length = [d[0][0].shape[0] for d in self.dataset]
 
@@ -156,8 +169,8 @@ if __name__=="__main__":
     import argparse
     parser = argparse.ArgumentParser(description='Generate dataset')
     parser.add_argument('--rate', '-r', type=int, default=4, help='Downsample rate divisible by 2')
-    parser.add_argument('--keep', '-', action='store_true', help='Keep all data in training set')
-    parser.add_argument('--multiview', '-', action='store_true', help='Multiview dataset')
+    parser.add_argument('--keep', '-k', action='store_true', help='Keep all data in training set')
+    parser.add_argument('--multiview', '-m', action='store_true', help='Multiview dataset')
     args = parser.parse_args()
 
     if args.multiview:

@@ -131,16 +131,16 @@ def val(net, classifier, validldr, criteria):
 def main():
     parser = argparse.ArgumentParser(description='Train task seperately')
 
-    parser.add_argument('--net', '-n', default='linear', help='Net name')
-    parser.add_argument('--input', '-i', default='results/SupConMBT7_4/latest.pth', help='Input file')
+    parser.add_argument('--net', '-n', default='mlp', help='Net name')
+    parser.add_argument('--input', '-i', default='results/SupConMBT7_4/best.pth', help='Input file')
     parser.add_argument('--config', '-c', type=int, default=7, help='Config number')
     parser.add_argument('--batch', '-b', type=int, default=32, help='Batch size')
     parser.add_argument('--rate', '-R', default='4', help='Rate')
     parser.add_argument('--opt', '-o', default='adam', help='Optimizer')
     parser.add_argument('--project', '-p', default='minimal', help='projection type')
     parser.add_argument('--epoch', '-e', type=int, default=10, help='Number of epoches')
-    parser.add_argument('--lr', '-a', type=float, default=0.00001, help='Learning rate')
-    parser.add_argument('--datadir', '-d', default='../../../../Data/DVlog/', help='Data folder path')
+    parser.add_argument('--lr', '-a', type=float, default=0.001, help='Learning rate')
+    parser.add_argument('--datadir', '-d', default='../../../Data/DVlog/', help='Data folder path')
     parser.add_argument('--sam', '-s', action='store_true', help='Apply SAM optimizer')
     parser.add_argument('--prenorm', '-P', action='store_true', help='Pre-norm')
     parser.add_argument('--keep', '-', action='store_true', help='Keep all data in training set')
@@ -156,6 +156,10 @@ def main():
     validset = DVlog('{}valid_{}{}.pickle'.format(args.datadir, keep, args.rate))
     trainldr = DataLoader(trainset, batch_size=args.batch, collate_fn=collate_fn, shuffle=True, num_workers=0)
     validldr = DataLoader(validset, batch_size=args.batch, collate_fn=collate_fn, shuffle=False, num_workers=0)
+
+    testset = DVlog('{}test_{}{}.pickle'.format(args.datadir, keep, args.rate))
+    test_criteria = nn.CrossEntropyLoss()
+    testldr = DataLoader(testset, batch_size=args.batch, collate_fn=collate_fn, shuffle=False, num_workers=0)
 
     net = SupConMBT(136, 25 , 256)
 
@@ -202,7 +206,7 @@ def main():
 
         os.makedirs(os.path.join('results', output_dir), exist_ok = True)
 
-        if val_f1 >= best_f1:
+        if val_f1 > best_f1:
             checkpoint = {'state_dict': classifier.state_dict()}
             torch.save(checkpoint, os.path.join('results', output_dir, 'best_val_f1.pth'))
             best_f1 = val_f1
@@ -216,10 +220,17 @@ def main():
 
         df = append_entry_df(df, eval_return)
 
+        eval_return = val(net, classifier, testldr, test_criteria)
+        _, val_f1, _, _, val_acc, _ = eval_return
+        description = "Epoch {:2d} | Rate {} | Testset {:.5f}:".format(epoch, args.rate, train_loss)
+        print_eval_info(description, eval_return)
 
-    testset = DVlog('{}test_{}{}.pickle'.format(args.datadir, keep, args.rate))
-    test_criteria = nn.CrossEntropyLoss()
-    testldr = DataLoader(testset, batch_size=args.batch, collate_fn=collate_fn, shuffle=False, num_workers=0)
+
+
+    eval_return = val(net, classifier, testldr, test_criteria)
+    description = 'Latest'
+    print_eval_info(description, eval_return)
+    df = append_entry_df(df, eval_return)
 
     best_f1_model = nn.DataParallel(best_f1_model).cuda()
     eval_return = val(net, best_f1_model, testldr, test_criteria)
