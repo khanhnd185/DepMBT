@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from timm.models.layers import trunc_normal_
-from transformer import Encoder, EncoderLayer, clones, LayerNorm
+from transformer import *
 
 def get_projection(input_dim, output_dim, projection_type):
     if projection_type == 'minimal':
@@ -243,34 +243,54 @@ class MS2OS(nn.Module):
         return out
 
 class CrossAttention(nn.Module):
-    def __init__(self, v_dim, a_dim, embed_dim, project_type='minimal', num_layers=2,
-                num_heads=4, head='mlp', num_classes=2, drop=0.1, feed_forward=256):
-        super(CrossAttention, self).__init__()
-        
-        self.audio_prj = get_projection(a_dim, embed_dim, project_type)
-        self.video_prj = get_projection(v_dim, embed_dim, project_type)
-        self.project_type_conv1d = (project_type=='conv1d')
+    def __init__(self, video_dimension, audio_dimension, fused_dimension, project_type='minimal', pre_norm=True,
+                head = 'mlp', feed_forward = 256, dropout = 0.1, num_heads = 8, num_classes = 2):
+        super().__init__()
+        self.pre_norm = pre_norm
+        self.project_type_conv1d = (project_type == 'conv1d')
+        self.audio_prj = get_projection(audio_dimension, fused_dimension, project_type)
+        self.video_prj = get_projection(video_dimension, fused_dimension, project_type)
 
-        self.video_encoder = Encoder(embed_dim, num_heads, feed_forward, drop, num_layers)
-        self.audio_encoder = Encoder(embed_dim, num_heads, feed_forward, drop, num_layers)
-        self.fused_encoder = Encoder(embed_dim, num_heads, feed_forward, drop, num_layers)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, fused_dimension))
+        self.mask_appnd = nn.Parameter(torch.ones(1, 1))
+        trunc_normal_(self.cls_token, std=.02)
 
+        norms = []
+        norms.append(LayerNorm(fused_dimension))
+        norms.append(LayerNorm(fused_dimension))
+        norms.append(LayerNorm(fused_dimension))
+        norms.append(LayerNorm(fused_dimension))
+        self.norms = nn.ModuleList(norms)
+
+        self.afeed_forward = PositionwiseFeedForward(fused_dimension, feed_forward, dropout)
+        self.adrop1 = nn.Dropout(dropout)
+        self.adrop2 = nn.Dropout(dropout)
+
+        self.vfeed_forward = PositionwiseFeedForward(fused_dimension, feed_forward, dropout)
+        self.vdrop1 = nn.Dropout(dropout)
+        self.vdrop2 = nn.Dropout(dropout)
+
+        self.audio_attn = MultiHeadedAttention(num_heads, fused_dimension)
+        self.video_attn = MultiHeadedAttention(num_heads, fused_dimension)
+
+        self.fused_encoder = Encoder(fused_dimension, num_heads, feed_forward, dropout, 3)
         if head == 'linear':
-            self.head = nn.Linear(embed_dim, num_classes)
+            self.head = nn.Linear(fused_dimension, num_classes)
         elif head == 'mlp':
             self.head = nn.Sequential(
-                nn.Linear(embed_dim, embed_dim),
+                nn.Linear(fused_dimension, fused_dimension),
                 nn.ReLU(inplace=True),
-                nn.Linear(embed_dim, num_classes)
+                nn.Linear(fused_dimension, num_classes)
             )
         else:
             raise NotImplementedError(
                 'head not supported: {}'.format(head))
 
-        self.mask_cls = nn.Parameter(torch.ones(1, 1))
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+    def maybe_normalize(self, i, x, pre):
+        if self.pre_norm == pre:
+            return  self.norms[i](x)
 
-        trunc_normal_(self.cls_token, std=.02)
+        return x
 
     def forward(self, a, v, m):
         B = a.shape[0]
@@ -281,19 +301,142 @@ class CrossAttention(nn.Module):
             a = self.audio_prj(a)
             v = self.video_prj(v)
 
-        a = self.audio_encoder(a, m)
-        v = self.video_encoder(v, m)
+        residual_a = a
+        residual_v = v
+        a = self.maybe_normalize(0, a, pre=True)
+        v = self.maybe_normalize(1, v, pre=True)
+        a = residual_a + self.adrop1(self.audio_attn(a, v, v, m))
+        v = residual_v + self.vdrop2(self.video_attn(v, a, a, m))
+        a = self.maybe_normalize(0, a, pre=False)
+        v = self.maybe_normalize(1, v, pre=False)
 
-        feat = torch.cat((a, v), dim=1)
-        mask = torch.cat((m, m), dim=1)
+        residual = a
+        a = self.maybe_normalize(2, a, pre=True)
+        a = residual + self.adrop2(self.afeed_forward(a))
+        a = self.maybe_normalize(2, a, pre=False)
 
-        cls_tokens = self.cls_token.expand(B, -1, -1)
-        feat = torch.cat((cls_tokens, feat), dim=1)
+        residual = v
+        v = self.maybe_normalize(3, v, pre=True)
+        v = residual + self.vdrop2(self.vfeed_forward(v))
+        v = self.maybe_normalize(3, v, pre=False)
 
-        mask_cls = self.mask_cls.expand(B, -1)
-        mask = torch.cat((mask_cls, mask), dim=1)
+        f = torch.cat((a, v), dim=1)
+        m = torch.cat((m, m), dim=1)
+        cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
+        mask_appnd = self.mask_appnd.expand(B, -1)
+        m = torch.cat((mask_appnd, m), dim=1)
+        f = torch.cat((cls_tokens, f), dim=1)
 
-        feat = self.fused_encoder(feat, mask)
+
+        feat = self.fused_encoder(f, m)
         out = self.head(feat[:, 0])
+
+        return out
+
+class FullAttention(nn.Module):
+    def __init__(self, video_dimension, audio_dimension, fused_dimension, project_type='minimal', pre_norm=True,
+                head = 'mlp', feed_forward = 256, dropout = 0.1, num_heads = 8, num_classes = 2,):
+        super().__init__()
+        self.pre_norm = pre_norm
+        self.project_type_conv1d = (project_type == 'conv1d')
+        self.audio_prj = get_projection(audio_dimension, fused_dimension, project_type)
+        self.video_prj = get_projection(video_dimension, fused_dimension, project_type)
+
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, fused_dimension))
+        self.mask_appnd = nn.Parameter(torch.ones(1, 1))
+        trunc_normal_(self.cls_token, std=.02)
+
+        norms = []
+        norms.append(LayerNorm(fused_dimension))
+        norms.append(LayerNorm(fused_dimension))
+        norms.append(LayerNorm(fused_dimension))
+        norms.append(LayerNorm(fused_dimension))
+        norms.append(LayerNorm(fused_dimension))
+        norms.append(LayerNorm(fused_dimension))
+        self.norms = nn.ModuleList(norms)
+
+        self.aself_attn = MultiHeadedAttention(num_heads, fused_dimension)
+        self.afeed_forward = PositionwiseFeedForward(fused_dimension, feed_forward, dropout)
+        self.adrop1 = nn.Dropout(dropout)
+        self.adrop2 = nn.Dropout(dropout)
+
+        self.vself_attn = MultiHeadedAttention(num_heads, fused_dimension)
+        self.vfeed_forward = PositionwiseFeedForward(fused_dimension, feed_forward, dropout)
+        self.vdrop1 = nn.Dropout(dropout)
+        self.vdrop2 = nn.Dropout(dropout)
+
+        self.audio_attn = MultiHeadedAttention(num_heads, fused_dimension)
+        self.video_attn = MultiHeadedAttention(num_heads, fused_dimension)
+        self.drop1 = nn.Dropout(dropout)
+        self.drop2 = nn.Dropout(dropout)
+
+        self.fused_encoder = Encoder(fused_dimension, num_heads, feed_forward, dropout, 3)
+        if head == 'linear':
+            self.head = nn.Linear(fused_dimension, num_classes)
+        elif head == 'mlp':
+            self.head = nn.Sequential(
+                nn.Linear(fused_dimension, fused_dimension),
+                nn.ReLU(inplace=True),
+                nn.Linear(fused_dimension, num_classes)
+            )
+        else:
+            raise NotImplementedError(
+                'head not supported: {}'.format(head))
+
+    def maybe_normalize(self, i, x, pre):
+        if self.pre_norm == pre:
+            return  self.norms[i](x)
+
+        return x
+
+    def forward(self, a, v, m):
+        B = a.shape[0]
+        if self.project_type_conv1d:
+            a = self.audio_prj(a.transpose(1, 2)).transpose(1, 2)
+            v = self.video_prj(v.transpose(1, 2)).transpose(1, 2)
+        else:
+            a = self.audio_prj(a)
+            v = self.video_prj(v)
+
+        residual = a
+        a = self.maybe_normalize(0, a, pre=True)
+        a = residual + self.adrop1(self.aself_attn(a, a, a, m))
+        a = self.maybe_normalize(0, a, pre=False)
+
+        residual = a
+        a = self.maybe_normalize(1, a, pre=True)
+        a = residual + self.adrop2(self.afeed_forward(a))
+        a = self.maybe_normalize(1, a, pre=False)
+
+        residual = v
+        v = self.maybe_normalize(2, v, pre=True)
+        v = residual + self.vdrop1(self.vself_attn(v, v, v, m))
+        v = self.maybe_normalize(2, v, pre=False)
+
+        residual = v
+        v = self.maybe_normalize(3, v, pre=True)
+        v = residual + self.vdrop2(self.vfeed_forward(v))
+        v = self.maybe_normalize(3, v, pre=False)
+
+        residual_a = a
+        residual_v = v
+        a = self.maybe_normalize(4, a, pre=True)
+        v = self.maybe_normalize(5, v, pre=True)
+        a = residual_a + self.drop1(self.audio_attn(a, v, v, m))
+        v = residual_v + self.drop2(self.video_attn(v, a, a, m))
+        a = self.maybe_normalize(4, a, pre=False)
+        v = self.maybe_normalize(5, v, pre=False)
+
+        f = torch.cat((a, v), dim=1)
+        m = torch.cat((m, m), dim=1)
+        cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
+        mask_appnd = self.mask_appnd.expand(B, -1)
+        m = torch.cat((mask_appnd, m), dim=1)
+        f = torch.cat((cls_tokens, f), dim=1)
+
+
+        feat = self.fused_encoder(f, m)
+        out = self.head(feat[:, 0])
+
         return out
 

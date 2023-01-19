@@ -7,7 +7,7 @@ from sam import SAM
 from tqdm import tqdm
 from dataset import DVlog, collate_fn
 from utils import *
-from model import CEMBT, MS2OS, EarlyConcat
+from model import CEMBT, MS2OS, EarlyConcat, FullAttention, CrossAttention
 from torch.utils.data import DataLoader
 from sklearn.metrics import recall_score, precision_score, accuracy_score, confusion_matrix
 
@@ -157,6 +157,10 @@ def main():
         net = EarlyConcat(136, 25, 256)
     elif args.net == 'ms2os':
         net = MS2OS(136, 25, 256)
+    elif args.net == 'cross':
+        net = CrossAttention(136, 25, 256)
+    elif args.net == 'full':
+        net = FullAttention(136, 25, 256)
     else:
         net = CEMBT(136, 25 , 256, head='mlp')
 
