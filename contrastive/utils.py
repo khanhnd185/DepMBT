@@ -222,9 +222,7 @@ def create_new_df():
 
 def print_eval_info(description, eval_return):
     val_loss, val_f1, val_recall, val_precision, val_acc, val_matrix = eval_return
-    print('{}: {:.5f},{:.5f},{:.5f},{:.5f},{:.5f}'.format(description, val_loss, val_acc, val_recall, val_precision, val_f1))
-    print('Confusion matrix {} {} {} {}'
-            .format(val_matrix[0][0],
+    print('{}: {:.5f},{:.5f},{:.5f},{:.5f},{:.5f} | Confusion matrix {} {} {} {}'.format(description, val_loss, val_acc, val_recall, val_precision, val_f1, val_matrix[0][0],
                     val_matrix[0][1],
                     val_matrix[1][0],
                     val_matrix[1][1]))

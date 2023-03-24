@@ -370,7 +370,7 @@ class FullAttention(nn.Module):
         self.drop1 = nn.Dropout(dropout)
         self.drop2 = nn.Dropout(dropout)
 
-        self.fused_encoder = Encoder(fused_dimension, num_heads, feed_forward, dropout, 3)
+        self.fused_encoder = Encoder(fused_dimension, num_heads, feed_forward, dropout, 2)
         if head == 'linear':
             self.head = nn.Linear(fused_dimension, num_classes)
         elif head == 'mlp':
