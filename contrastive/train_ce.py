@@ -20,7 +20,7 @@ def train(net, trainldr, optimizer, epoch, epochs, learning_rate, criteria):
     for batch_idx, data in enumerate(tqdm(trainldr)):
         feature_audio, feature_video, mask, labels = data
 
-        # adjust_learning_rate(optimizer, epoch, epochs, learning_rate, batch_idx, train_loader_len)
+        adjust_learning_rate(optimizer, epoch, epochs, learning_rate, batch_idx, train_loader_len)
         feature_audio = feature_audio.cuda()
         feature_video = feature_video.cuda()
         mask = mask.cuda()
@@ -125,12 +125,12 @@ def main():
 
     parser.add_argument('--net', '-n', default='mbt', help='Net name')
     parser.add_argument('--input', '-i', default='', help='Input file')
-    parser.add_argument('--config', '-c', type=int, default=7, help='Config number')
+    parser.add_argument('--config', '-c', default='0', help='Config')
     parser.add_argument('--batch', '-b', type=int, default=32, help='Batch size')
     parser.add_argument('--rate', '-R', default='4', help='Rate')
     parser.add_argument('--opt', '-o', default='adam', help='Optimizer')
     parser.add_argument('--project', '-p', default='minimal', help='projection type')
-    parser.add_argument('--epoch', '-e', type=int, default=10, help='Number of epoches')
+    parser.add_argument('--epoch', '-e', type=int, default=20, help='Number of epoches')
     parser.add_argument('--lr', '-a', type=float, default=0.00001, help='Learning rate')
     parser.add_argument('--datadir', '-d', default='../../../../Data/DVlog/', help='Data folder path')
     parser.add_argument('--sam', '-s', action='store_true', help='Apply SAM optimizer')
@@ -139,7 +139,7 @@ def main():
 
     args = parser.parse_args()
     keep = 'k' if args.keep else ''
-    output_dir = 'CE{}-mlp{}'.format(args.net, str(args.config), args.rate)
+    output_dir = 'CE{}-mlp{}'.format(args.net, args.config, args.rate)
 
     train_criteria = nn.CrossEntropyLoss()
     valid_criteria = nn.CrossEntropyLoss()
@@ -162,7 +162,7 @@ def main():
     elif args.net == 'full':
         net = FullAttention(136, 25, 256)
     else:
-        net = CEMBT(136, 25 , 256, head='mlp')
+        net = CEMBT(136, 25 , 256)
 
     if args.input != '':
         print("Resume form | {} ]".format(args.input))

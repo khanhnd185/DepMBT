@@ -1,6 +1,6 @@
 import argparse
 import torch
-from model import CEMBT, EarlyConcat, MS2OS
+from model import CEMBT, EarlyConcat, MS2OS, CrossAttention, FullAttention
 from ptflops import get_model_complexity_info
 
 from functools import partial
@@ -18,19 +18,26 @@ def bert_input_constructor(input_shape, feature_sizes):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train task seperately')
 
-    parser.add_argument('--net', '-n', default='ms2os', help='Net name')
+    parser.add_argument('--net', '-n', default='mbt', help='Net name')
+    parser.add_argument('--len', '-l', type=int, default=256, help='Sequence length')
+    parser.add_argument('--layer', '-L', type=int, default=4, help='Num of layers')
     args = parser.parse_args()
 
     if args.net == 'early':
-        model = EarlyConcat(136, 25, 256)
+        net = EarlyConcat(136, 25, 256, num_layers=args.layer)
     elif args.net == 'ms2os':
-        model = MS2OS(136, 25, 256)
+        net = MS2OS(136, 25, 256)
+    elif args.net == 'cross':
+        net = CrossAttention(136, 25, 256)
+    elif args.net == 'full':
+        net = FullAttention(136, 25, 256)
     else:
-        model = CEMBT(136, 25 , 256, head='mlp')
-    input_shape = (16, 512)
+        net = CEMBT(136, 25 , 256)
+
+    input_shape = (16, args.len)
     feature_sizes = (25, 136)
     flops_count, params_count = get_model_complexity_info(
-            model, input_shape, as_strings=True,
+            net, input_shape, as_strings=True,
             input_constructor=partial(bert_input_constructor, feature_sizes=feature_sizes),
             print_per_layer_stat=False)
     print("Model " + args.net)

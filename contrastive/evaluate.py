@@ -5,7 +5,7 @@ import argparse
 from tqdm import tqdm
 from dataset import DVlog, collate_fn
 from utils import *
-from model import SupConMBT, CEMBT
+from model import SupConMBT, CEMBT, EarlyConcat, MS2OS, CrossAttention, FullAttention
 from torch.utils.data import DataLoader
 from sklearn.metrics import recall_score, precision_score, accuracy_score, confusion_matrix
 
@@ -107,9 +107,9 @@ def val(net, validldr, criteria):
 def main():
     parser = argparse.ArgumentParser(description='Train task seperately')
 
-    parser.add_argument('--net', '-n', default='mbt', help='Net name')
-    parser.add_argument('--head', '-H', default='results/best_supcon/head.pth', help='Input file')
-    parser.add_argument('--input', '-i', default='results/best_supcon/mbt.pth', help='Input file')
+    parser.add_argument('--net', '-n', default='cembt', help='Net name')
+    parser.add_argument('--head', '-H', default='results/best_supcon_test/head.pth', help='Input file')
+    parser.add_argument('--input', '-i', default='results/best_supcon_test/mbt.pth', help='Input file')
     parser.add_argument('--config', '-c', type=int, default=7, help='Config number')
     parser.add_argument('--batch', '-b', type=int, default=8, help='Batch size')
     parser.add_argument('--rate', '-R', default='4', help='Rate')
@@ -158,7 +158,16 @@ def main():
         description = 'Trainset'
         print_eval_info(description, eval_return)
     else:
-        net = CEMBT(136, 25 , 256)
+        if args.net == 'early':
+            net = EarlyConcat(136, 25, 256)
+        elif args.net == 'ms2os':
+            net = MS2OS(136, 25, 256)
+        elif args.net == 'cross':
+            net = CrossAttention(136, 25, 256)
+        elif args.net == 'full':
+            net = FullAttention(136, 25, 256)
+        else:
+            net = CEMBT(136, 25 , 256, head='mlp')
 
         print("Resume form {}".format(args.input))
         net = load_state_dict(net, args.input)

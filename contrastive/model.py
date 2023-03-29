@@ -16,7 +16,7 @@ def get_projection(input_dim, output_dim, projection_type):
 
 class MBT(nn.Module):
     def __init__(self, v_dim, a_dim, embed_dim, num_bottle_token=4, bottle_layer=1
-                , project_type='minimal', num_head=8, drop=.1, num_layers=4, feat_dim=128):
+                , project_type='minimal', num_head=4, drop=.1, num_layers=2, feed_forward=256):
         super().__init__()
         self.num_layers = num_layers
         self.bottle_layer = bottle_layer
@@ -26,8 +26,7 @@ class MBT(nn.Module):
         self.audio_prj = get_projection(a_dim, embed_dim, project_type)
         self.video_prj = get_projection(v_dim, embed_dim, project_type)
 
-        ff = embed_dim
-        layer = EncoderLayer(embed_dim, num_head, ff, drop)
+        layer = EncoderLayer(embed_dim, num_head, feed_forward, drop)
         self.video_layers = clones(layer, num_layers)
         self.audio_layers = clones(layer, num_layers)
 
@@ -39,7 +38,6 @@ class MBT(nn.Module):
 
         self.norma = LayerNorm(layer.size)
         self.normv = LayerNorm(layer.size)
-        self.head = nn.Linear(embed_dim, feat_dim)
 
         trunc_normal_(self.bot_token, std=.02)
         trunc_normal_(self.acls_token, std=.02)
@@ -75,17 +73,15 @@ class MBT(nn.Module):
         mask_bot = self.mask_bot.expand(B, -1)
         mask = torch.cat((mask_bot, mask), dim=1)
         bot_token = self.bot_token.expand(B, -1, -1)
+        a = torch.cat((bot_token, a), dim=1)
+        v = torch.cat((bot_token, v), dim=1)
 
         for i in range(self.bottle_layer, self.num_layers):
-            a = torch.cat((bot_token, a), dim=1)
-            v = torch.cat((bot_token, v), dim=1)
-
             v = self.video_layers[i](v, mask)
             a = self.audio_layers[i](a, mask)
 
-            bot_token = (a[:, :self.num_bottle_token] + v[:, :self.num_bottle_token]) / 2
-            a = a[:, self.num_bottle_token:]
-            v = v[:, self.num_bottle_token:]
+            a[:, :self.num_bottle_token] = (a[:, :self.num_bottle_token] + v[:, :self.num_bottle_token]) / 2
+            v[:, :self.num_bottle_token] = a[:, :self.num_bottle_token]
 
         a = self.norma(a)
         v = self.normv(v)
@@ -139,7 +135,7 @@ class CEMBT(nn.Module):
 
 class EarlyConcat(nn.Module):
     def __init__(self, v_dim, a_dim, embed_dim, project_type='minimal', num_layers=4,
-                num_heads=8, head='mlp', num_classes=2, drop=0.1, feed_forward=256):
+                num_heads=4, head='mlp', num_classes=2, drop=0.1, feed_forward=256):
         super(EarlyConcat, self).__init__()
         
         self.audio_prj = get_projection(a_dim, embed_dim, project_type)
@@ -196,9 +192,9 @@ class MS2OS(nn.Module):
         self.video_prj = get_projection(v_dim, embed_dim, project_type)
         self.project_type_conv1d = (project_type=='conv1d')
 
-        self.video_encoder = Encoder(embed_dim, num_heads, feed_forward, drop, num_layers)
-        self.audio_encoder = Encoder(embed_dim, num_heads, feed_forward, drop, num_layers)
-        self.fused_encoder = Encoder(embed_dim, num_heads, feed_forward, drop, num_layers)
+        self.video_encoder = Encoder(embed_dim, num_heads, feed_forward, drop, 1)
+        self.audio_encoder = Encoder(embed_dim, num_heads, feed_forward, drop, 1)
+        self.fused_encoder = Encoder(embed_dim, num_heads, feed_forward, drop, 3)
 
         if head == 'linear':
             self.head = nn.Linear(embed_dim, num_classes)
@@ -346,13 +342,7 @@ class FullAttention(nn.Module):
         self.mask_appnd = nn.Parameter(torch.ones(1, 1))
         trunc_normal_(self.cls_token, std=.02)
 
-        norms = []
-        norms.append(LayerNorm(fused_dimension))
-        norms.append(LayerNorm(fused_dimension))
-        norms.append(LayerNorm(fused_dimension))
-        norms.append(LayerNorm(fused_dimension))
-        norms.append(LayerNorm(fused_dimension))
-        norms.append(LayerNorm(fused_dimension))
+        norms = [LayerNorm(fused_dimension) for _ in range(8)]
         self.norms = nn.ModuleList(norms)
 
         self.aself_attn = MultiHeadedAttention(num_heads, fused_dimension)
@@ -365,10 +355,14 @@ class FullAttention(nn.Module):
         self.vdrop1 = nn.Dropout(dropout)
         self.vdrop2 = nn.Dropout(dropout)
 
-        self.audio_attn = MultiHeadedAttention(num_heads, fused_dimension)
-        self.video_attn = MultiHeadedAttention(num_heads, fused_dimension)
-        self.drop1 = nn.Dropout(dropout)
-        self.drop2 = nn.Dropout(dropout)
+        self.across_attn = MultiHeadedAttention(num_heads, fused_dimension)
+        self.vcross_attn = MultiHeadedAttention(num_heads, fused_dimension)
+        self.avfeed_forward = PositionwiseFeedForward(fused_dimension, feed_forward, dropout)
+        self.vafeed_forward = PositionwiseFeedForward(fused_dimension, feed_forward, dropout)
+        self.avdrop1 = nn.Dropout(dropout)
+        self.avdrop2 = nn.Dropout(dropout)
+        self.vadrop1 = nn.Dropout(dropout)
+        self.vadrop2 = nn.Dropout(dropout)
 
         self.fused_encoder = Encoder(fused_dimension, num_heads, feed_forward, dropout, 2)
         if head == 'linear':
@@ -422,10 +416,20 @@ class FullAttention(nn.Module):
         residual_v = v
         a = self.maybe_normalize(4, a, pre=True)
         v = self.maybe_normalize(5, v, pre=True)
-        a = residual_a + self.drop1(self.audio_attn(a, v, v, m))
-        v = residual_v + self.drop2(self.video_attn(v, a, a, m))
+        a = residual_a + self.avdrop1(self.across_attn(a, v, v, m))
+        v = residual_v + self.vadrop1(self.vcross_attn(v, a, a, m))
         a = self.maybe_normalize(4, a, pre=False)
         v = self.maybe_normalize(5, v, pre=False)
+
+        residual = a
+        a = self.maybe_normalize(6, a, pre=True)
+        a = residual + self.avdrop2(self.avfeed_forward(a))
+        a = self.maybe_normalize(6, a, pre=False)
+
+        residual = v
+        v = self.maybe_normalize(7, v, pre=True)
+        v = residual + self.vadrop2(self.vafeed_forward(v))
+        v = self.maybe_normalize(7, v, pre=False)
 
         f = torch.cat((a, v), dim=1)
         m = torch.cat((m, m), dim=1)
