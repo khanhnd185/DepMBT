@@ -21,7 +21,7 @@ def train(net, classifier, trainldr, optimizer, epoch, epochs, learning_rate, cr
     for batch_idx, data in enumerate(tqdm(trainldr)):
         feature_audio, feature_video, mask, labels = data
 
-        # adjust_learning_rate(optimizer, epoch, epochs, learning_rate, batch_idx, train_loader_len)
+        adjust_learning_rate(optimizer, epoch, epochs, learning_rate, batch_idx, train_loader_len)
         feature_audio = feature_audio.cuda()
         feature_video = feature_video.cuda()
         mask = mask.cuda()
@@ -96,7 +96,7 @@ def val(net, classifier, validldr, criteria):
 
     all_y = None
     all_labels = None
-    for batch_idx, data in enumerate(tqdm(validldr)):
+    for batch_idx, data in enumerate(validldr):
         feature_audio, feature_video, mask, labels = data
         with torch.no_grad():
             feature_audio = feature_audio.cuda()
@@ -192,6 +192,7 @@ def main():
     best_f1 = 0.0
     best_recall = 0.0
     df = create_new_df()
+    df_test = create_new_df()
 
     for epoch in range(args.epoch):
         if args.sam:
@@ -201,7 +202,7 @@ def main():
 
         eval_return = val(net, classifier, validldr, valid_criteria)
         _, val_f1, val_recall, _, _, _ = eval_return
-        description = "Epoch {:2d} | Rate {} | Trainloss {:.5f}:".format(epoch, args.rate, train_loss)
+        description = "Epoch {:2d} | Rate {} | Val:".format(epoch, args.rate)
         print_eval_info(description, eval_return)
 
         os.makedirs(os.path.join('results', output_dir), exist_ok = True)
@@ -213,32 +214,32 @@ def main():
             best_f1_model = deepcopy(classifier)
 
         if val_recall >= best_recall:
-            checkpoint = {'state_dict': net.state_dict()}
+            checkpoint = {'state_dict': classifier.state_dict()}
             torch.save(checkpoint, os.path.join('results', output_dir, 'best_val_acc.pth'))
             best_recall = val_recall
-            best_recall_model = deepcopy(net)
+            best_recall_model = deepcopy(classifier)
 
         df = append_entry_df(df, eval_return)
 
-        eval_return = val(net, testldr, test_criteria)
+        eval_return = val(net, classifier, testldr, valid_criteria)
         _, val_f1, _, _, _, _ = eval_return
         description = "Epoch {:2d} | Rate {} | Tes:".format(epoch, args.rate)
         print_eval_info(description, eval_return)
         df_test = append_entry_df(df_test, eval_return)
 
-    eval_return = val(net, testldr, test_criteria)
+    eval_return = val(net, classifier, testldr, test_criteria)
     description = 'Latest'
     print_eval_info(description, eval_return)
     df = append_entry_df(df, eval_return)
 
     best_f1_model = nn.DataParallel(best_f1_model).cuda()
-    eval_return = val(best_f1_model, testldr, test_criteria)
+    eval_return = val(net, best_f1_model, testldr, test_criteria)
     description = 'Best F1 Testset'
     print_eval_info(description, eval_return)
     df = append_entry_df(df, eval_return)
 
     best_recall_model = nn.DataParallel(best_recall_model).cuda()
-    eval_return = val(best_recall_model, testldr, test_criteria)
+    eval_return = val(net, best_recall_model, testldr, test_criteria)
     description = 'Best Recall Testset'
     print_eval_info(description, eval_return)
     df = append_entry_df(df, eval_return)
