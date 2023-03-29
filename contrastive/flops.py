@@ -24,7 +24,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.net == 'early':
-        net = EarlyConcat(136, 25, 256, num_layers=args.layer)
+        net = EarlyConcat(136, 25, 256)
     elif args.net == 'ms2os':
         net = MS2OS(136, 25, 256)
     elif args.net == 'cross':

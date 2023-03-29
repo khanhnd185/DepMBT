@@ -16,7 +16,7 @@ def get_projection(input_dim, output_dim, projection_type):
 
 class MBT(nn.Module):
     def __init__(self, v_dim, a_dim, embed_dim, num_bottle_token=4, bottle_layer=1
-                , project_type='minimal', num_head=4, drop=.1, num_layers=2, feed_forward=256):
+                , project_type='minimal', num_head=8, drop=.1, num_layers=3, feed_forward=256):
         super().__init__()
         self.num_layers = num_layers
         self.bottle_layer = bottle_layer
@@ -134,7 +134,7 @@ class CEMBT(nn.Module):
         return feat
 
 class EarlyConcat(nn.Module):
-    def __init__(self, v_dim, a_dim, embed_dim, project_type='minimal', num_layers=4,
+    def __init__(self, v_dim, a_dim, embed_dim, project_type='minimal', num_layers=6,
                 num_heads=4, head='mlp', num_classes=2, drop=0.1, feed_forward=256):
         super(EarlyConcat, self).__init__()
         
@@ -194,7 +194,7 @@ class MS2OS(nn.Module):
 
         self.video_encoder = Encoder(embed_dim, num_heads, feed_forward, drop, 1)
         self.audio_encoder = Encoder(embed_dim, num_heads, feed_forward, drop, 1)
-        self.fused_encoder = Encoder(embed_dim, num_heads, feed_forward, drop, 3)
+        self.fused_encoder = Encoder(embed_dim, num_heads, feed_forward, drop, 4)
 
         if head == 'linear':
             self.head = nn.Linear(embed_dim, num_classes)
@@ -269,7 +269,7 @@ class CrossAttention(nn.Module):
         self.audio_attn = MultiHeadedAttention(num_heads, fused_dimension)
         self.video_attn = MultiHeadedAttention(num_heads, fused_dimension)
 
-        self.fused_encoder = Encoder(fused_dimension, num_heads, feed_forward, dropout, 3)
+        self.fused_encoder = Encoder(fused_dimension, num_heads, feed_forward, dropout, 4)
         if head == 'linear':
             self.head = nn.Linear(fused_dimension, num_classes)
         elif head == 'mlp':
