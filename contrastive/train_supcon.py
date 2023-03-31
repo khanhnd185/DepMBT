@@ -43,7 +43,7 @@ def train(net, trainldr, optimizer, epoch, epochs, learning_rate, criteria):
 def main():
     parser = argparse.ArgumentParser(description='Train task seperately')
 
-    parser.add_argument('--config', '-c', type=int, default=7, help='Config number')
+    parser.add_argument('--config', '-c', default='0', help='Config')
     parser.add_argument('--batch', '-b', type=int, default=32, help='Batch size')
     parser.add_argument('--rate', '-R', default='4', help='Rate')
     parser.add_argument('--opt', '-o', default='adam', help='Optimizer')
@@ -55,7 +55,7 @@ def main():
     parser.add_argument('--prenorm', '-P', action='store_true', help='Pre-norm')
 
     args = parser.parse_args()
-    output_dir = 'SupConMBT{}_{}'.format(str(args.config), args.rate)
+    output_dir = 'SupConMBT{}_{}'.format(args.config, args.rate)
     os.makedirs(os.path.join('results', output_dir), exist_ok = True)
 
     train_criteria = SupConLoss(temperature=args.temp)
@@ -80,7 +80,9 @@ def main():
 
         if train_loss <= best_loss:
             checkpoint = {'state_dict': net.state_dict()}
-            torch.save(checkpoint, os.path.join('results', output_dir, 'best.pth'))
+            name = epoch // 10
+            name = 'best{}.pth'.format(name)
+            torch.save(checkpoint, os.path.join('results', output_dir, name))
             best_loss = train_loss
 
 

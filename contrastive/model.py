@@ -135,7 +135,7 @@ class CEMBT(nn.Module):
 
 class EarlyConcat(nn.Module):
     def __init__(self, v_dim, a_dim, embed_dim, project_type='minimal', num_layers=6,
-                num_heads=4, head='mlp', num_classes=2, drop=0.1, feed_forward=256):
+                num_heads=8, head='mlp', num_classes=2, drop=0.1, feed_forward=256):
         super(EarlyConcat, self).__init__()
         
         self.audio_prj = get_projection(a_dim, embed_dim, project_type)
@@ -185,7 +185,7 @@ class EarlyConcat(nn.Module):
 
 class MS2OS(nn.Module):
     def __init__(self, v_dim, a_dim, embed_dim, project_type='minimal', num_layers=2,
-                num_heads=4, head='mlp', num_classes=2, drop=0.1, feed_forward=256):
+                num_heads=8, head='mlp', num_classes=2, drop=0.1, feed_forward=256):
         super(MS2OS, self).__init__()
         
         self.audio_prj = get_projection(a_dim, embed_dim, project_type)
