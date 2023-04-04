@@ -6,6 +6,60 @@ import numpy as np
 from tqdm import tqdm
 from torch.utils.data import Dataset
 
+
+class NewEATD(Dataset):
+    def __init__(self, features, is_train, y, fold_index, permulation_audio_index, permulation_text_index=[0], maxlen=768):
+        super(NewEATD, self).__init__()
+        self.audio, self.text, self.label = [[] for _ in range(3)]
+        
+        for i, feature in enumerate(features):
+            if i not in fold_index:
+                continue
+
+            audiopos = feature['audiopos'][-maxlen:,:]
+            audioneg = feature['audioneg'][-maxlen:,:]
+            audioneu = feature['audioneu'][-maxlen:,:]
+            textpos = feature['textpos'][-maxlen:,:]
+            textneg = feature['textneg'][-maxlen:,:]
+            textneu = feature['textneu'][-maxlen:,:]
+            audio = (audiopos, audioneg, audioneu)
+            text = (textpos, textneg, textneu)
+   
+            if is_train == False:
+                self.text.append(np.concatenate(text))
+                self.audio.append(np.concatenate(audio)) 
+                self.label.append(int(y[i]))
+                continue
+
+            for j, permulate_text in enumerate(itertools.permutations(text, 3)):
+                if j not in permulation_text_index:
+                    continue
+                self.text.append(np.concatenate(permulate_text))
+                self.audio.append(np.concatenate(audio)) 
+                self.label.append(int(y[i]))
+
+                if y[i] == False:
+                    continue
+
+                for k, permulate_audio in enumerate(itertools.permutations(audio, 3)):
+                    if k not in permulation_audio_index:
+                        continue
+
+                    self.text.append(np.concatenate(permulate_text))
+                    self.audio.append(np.concatenate(permulate_audio)) 
+                    self.label.append(int(y[i]))
+
+        self.lenga = [i.shape[0] for i in self.audio]
+        self.lengt = [i.shape[0] for i in self.text]
+
+    def __len__(self):
+        return len(self.label)
+
+    def __getitem__(self, i):
+        return self.audio[i], self.text[i], self.lenga[i], self.lengt[i], self.label[i]
+
+
+
 class EATD(Dataset):
     def __init__(self, audio, text, y, fold_index, permulation_index):
         super(EATD, self).__init__()

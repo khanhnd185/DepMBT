@@ -48,6 +48,9 @@ def extract_text(file_paths):
 
 def extract_audio(file_path):
     speech, sample_rate = torchaudio.load(file_path)
+    if speech.shape[1] == 0:
+        speech, sample_rate = torchaudio.load(file_path[:-8] + '.wav')
+
     #speech = speech.squeeze(0)  # Remove the unnecessary channel dimension
     speech = speech[0]
     inputs = audio_processor(speech, return_tensors="pt", padding=True, sampling_rate=sample_rate)

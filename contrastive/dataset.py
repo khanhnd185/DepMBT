@@ -7,6 +7,23 @@ from torch.utils.data import Dataset
 from torch.nn.utils.rnn import pad_sequence
 
 
+def masked_collate_fn(data):
+    audio, video, lengtha, lengthv, labels = zip(*data)
+    labels = torch.tensor(labels).long()
+    lengtha = torch.tensor(lengtha).long()
+    maska = torch.arange(max(lengtha))[None, :] < lengtha[:, None]
+    lengthv = torch.tensor(lengthv).long()
+    maskv = torch.arange(max(lengthv))[None, :] < lengthv[:, None]
+
+    feature_audio = [torch.tensor(a).long() for a in audio]
+    feature_video = [torch.tensor(v).long() for v in video]
+    feature_audio = pad_sequence(feature_audio, batch_first=True, padding_value=0)
+    feature_video = pad_sequence(feature_video, batch_first=True, padding_value=0)
+
+    return feature_audio.float(), feature_video.float(), maska.long(), maskv.long(), labels
+
+
+
 def collate_fn(data):
     audio, video, labels, lengths = zip(*data)
     labels = torch.tensor(labels).long()
