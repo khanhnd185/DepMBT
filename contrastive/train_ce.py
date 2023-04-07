@@ -134,15 +134,19 @@ def main():
     parser.add_argument('--lr', '-a', type=float, default=0.00001, help='Learning rate')
     parser.add_argument('--datadir', '-d', default='../../../../Data/DVlog/', help='Data folder path')
     parser.add_argument('--sam', '-s', action='store_true', help='Apply SAM optimizer')
-    parser.add_argument('--prenorm', '-P', action='store_true', help='Pre-norm')
+    parser.add_argument('--loss', '-l', default='ce', help='Loss function')
     parser.add_argument('--keep', '-', action='store_true', help='Keep all data in training set')
 
     args = parser.parse_args()
     keep = 'k' if args.keep else ''
     output_dir = 'CE{}-mlp{}'.format(args.net, args.config, args.rate)
 
-    train_criteria = nn.CrossEntropyLoss()
-    valid_criteria = nn.CrossEntropyLoss()
+    if args.loss == 'focal':
+        train_criteria = FocalLoss(gamma=1.0)
+        valid_criteria = FocalLoss(gamma=1.0)
+    else:
+        train_criteria = nn.CrossEntropyLoss()
+        valid_criteria = nn.CrossEntropyLoss()
 
     trainset = DVlog('{}train_{}{}.pickle'.format(args.datadir, keep, args.rate))
     validset = DVlog('{}valid_{}{}.pickle'.format(args.datadir, keep, args.rate))
@@ -154,15 +158,15 @@ def main():
     testldr = DataLoader(testset, batch_size=args.batch, collate_fn=collate_fn, shuffle=False, num_workers=0)
 
     if args.net == 'early':
-        net = EarlyConcat(136, 25, 256)
+        net = EarlyConcat(136, 25, 256, project_type=args.project)
     elif args.net == 'ms2os':
-        net = MS2OS(136, 25, 256)
+        net = MS2OS(136, 25, 256, project_type=args.project)
     elif args.net == 'cross':
-        net = CrossAttention(136, 25, 256)
+        net = CrossAttention(136, 25, 256, project_type=args.project)
     elif args.net == 'full':
-        net = FullAttention(136, 25, 256)
+        net = FullAttention(136, 25, 256, project_type=args.project)
     else:
-        net = CEMBT(136, 25 , 256)
+        net = CEMBT(136, 25 , 256, project_type=args.project)
 
     if args.input != '':
         print("Resume form | {} ]".format(args.input))

@@ -3,12 +3,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 from timm.models.layers import trunc_normal_
 from transformer import *
+from tcn import TemporalConvNet
 
 def get_projection(input_dim, output_dim, projection_type):
     if projection_type == 'minimal':
         return nn.Linear(input_dim, output_dim)
     if projection_type == 'conv1d':
         return nn.Conv1d(input_dim, output_dim, kernel_size=1, padding=0, bias=False)
+    if projection_type == 'tcn':
+        return TemporalConvNet(num_inputs=input_dim, num_channels=[output_dim, output_dim])
     elif projection_type == '':
         return nn.Identity()
     else:
@@ -21,7 +24,7 @@ class MBT(nn.Module):
         self.num_layers = num_layers
         self.bottle_layer = bottle_layer
         self.num_bottle_token = num_bottle_token
-        self.project_type_conv1d = (project_type=='conv1d')
+        self.swap_dim = (project_type == 'conv1d' or project_type == 'tcn')
         
         self.audio_prj = get_projection(a_dim, embed_dim, project_type)
         self.video_prj = get_projection(v_dim, embed_dim, project_type)
@@ -49,7 +52,7 @@ class MBT(nn.Module):
             v : (batch_size, seq_len, v_dim)
         '''
         B = a.shape[0]
-        if self.project_type_conv1d:
+        if self.swap_dim:
             a = self.audio_prj(a.transpose(1, 2)).transpose(1, 2)
             v = self.video_prj(v.transpose(1, 2)).transpose(1, 2)
         else:
@@ -142,7 +145,7 @@ class EarlyConcat(nn.Module):
         
         self.audio_prj = get_projection(a_dim, embed_dim, project_type)
         self.video_prj = get_projection(v_dim, embed_dim, project_type)
-        self.project_type_conv1d = (project_type=='conv1d')
+        self.swap_dim = (project_type == 'conv1d' or project_type == 'tcn')
 
         self.encoder = Encoder(embed_dim, num_heads, feed_forward, drop, num_layers)
         if head == 'linear':
@@ -164,7 +167,7 @@ class EarlyConcat(nn.Module):
 
     def forward(self, a, v, m):
         B = a.shape[0]
-        if self.project_type_conv1d:
+        if self.swap_dim:
             a = self.audio_prj(a.transpose(1, 2)).transpose(1, 2)
             v = self.video_prj(v.transpose(1, 2)).transpose(1, 2)
         else:
@@ -192,7 +195,7 @@ class MS2OS(nn.Module):
         
         self.audio_prj = get_projection(a_dim, embed_dim, project_type)
         self.video_prj = get_projection(v_dim, embed_dim, project_type)
-        self.project_type_conv1d = (project_type=='conv1d')
+        self.swap_dim = (project_type == 'conv1d' or project_type == 'tcn')
 
         self.video_encoder = Encoder(embed_dim, num_heads, feed_forward, drop, 1)
         self.audio_encoder = Encoder(embed_dim, num_heads, feed_forward, drop, 1)
@@ -217,7 +220,7 @@ class MS2OS(nn.Module):
 
     def forward(self, a, v, m):
         B = a.shape[0]
-        if self.project_type_conv1d:
+        if self.swap_dim:
             a = self.audio_prj(a.transpose(1, 2)).transpose(1, 2)
             v = self.video_prj(v.transpose(1, 2)).transpose(1, 2)
         else:
@@ -245,7 +248,7 @@ class CrossAttention(nn.Module):
                 head = 'mlp', feed_forward = 256, dropout = 0.1, num_heads = 8, num_classes = 2):
         super().__init__()
         self.pre_norm = pre_norm
-        self.project_type_conv1d = (project_type == 'conv1d')
+        self.swap_dim = (project_type == 'conv1d' or project_type == 'tcn')
         self.audio_prj = get_projection(audio_dimension, fused_dimension, project_type)
         self.video_prj = get_projection(video_dimension, fused_dimension, project_type)
 
@@ -292,7 +295,7 @@ class CrossAttention(nn.Module):
 
     def forward(self, a, v, m):
         B = a.shape[0]
-        if self.project_type_conv1d:
+        if self.swap_dim:
             a = self.audio_prj(a.transpose(1, 2)).transpose(1, 2)
             v = self.video_prj(v.transpose(1, 2)).transpose(1, 2)
         else:
@@ -336,7 +339,7 @@ class FullAttention(nn.Module):
                 head = 'mlp', feed_forward = 256, dropout = 0.1, num_heads = 8, num_classes = 2,):
         super().__init__()
         self.pre_norm = pre_norm
-        self.project_type_conv1d = (project_type == 'conv1d')
+        self.swap_dim = (project_type == 'conv1d' or project_type == 'tcn')
         self.audio_prj = get_projection(audio_dimension, fused_dimension, project_type)
         self.video_prj = get_projection(video_dimension, fused_dimension, project_type)
 
@@ -387,7 +390,7 @@ class FullAttention(nn.Module):
 
     def forward(self, a, v, m):
         B = a.shape[0]
-        if self.project_type_conv1d:
+        if self.swap_dim:
             a = self.audio_prj(a.transpose(1, 2)).transpose(1, 2)
             v = self.video_prj(v.transpose(1, 2)).transpose(1, 2)
         else:
@@ -486,7 +489,7 @@ class MMBT(nn.Module):
         self.num_layers = num_layers
         self.bottle_layer = bottle_layer
         self.num_bottle_token = num_bottle_token
-        self.project_type_conv1d = (project_type=='conv1d')
+        self.swap_dim = (project_type == 'conv1d' or project_type == 'tcn')
         
         self.audio_prj = get_projection(a_dim, embed_dim, project_type)
         self.video_prj = get_projection(v_dim, embed_dim, project_type)
@@ -514,7 +517,7 @@ class MMBT(nn.Module):
             v : (batch_size, seq_len, v_dim)
         '''
         B = a.shape[0]
-        if self.project_type_conv1d:
+        if self.swap_dim:
             a = self.audio_prj(a.transpose(1, 2)).transpose(1, 2)
             v = self.video_prj(v.transpose(1, 2)).transpose(1, 2)
         else:
@@ -578,3 +581,47 @@ class CEMMBT(nn.Module):
         feat = self.encoder(a, t, ma, mt)
         feat = self.head(feat)
         return feat
+
+class UnimodalTransformer(nn.Module):
+    def __init__(self, in_dim, embed_dim, project_type='minimal', num_layers=6,
+                num_heads=8, head='mlp', num_classes=2, drop=0.1, feed_forward=256):
+        super(UnimodalTransformer, self).__init__()
+        
+        self.project = get_projection(in_dim, embed_dim, project_type)
+        self.swap_dim = (project_type == 'conv1d' or project_type == 'tcn')
+
+        self.encoder = Encoder(embed_dim, num_heads, feed_forward, drop, num_layers)
+        if head == 'linear':
+            self.head = nn.Linear(embed_dim, num_classes)
+        elif head == 'mlp':
+            self.head = nn.Sequential(
+                nn.Linear(embed_dim, embed_dim),
+                nn.ReLU(inplace=True),
+                nn.Linear(embed_dim, num_classes)
+            )
+        else:
+            raise NotImplementedError(
+                'head not supported: {}'.format(head))
+
+        self.mask_cls = nn.Parameter(torch.ones(1, 1))
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+
+        trunc_normal_(self.cls_token, std=.02)
+
+    def forward(self, a, m):
+        B = a.shape[0]
+        if self.swap_dim:
+            a = self.project(a.transpose(1, 2)).transpose(1, 2)
+        else:
+            a = self.project(a)
+
+        cls_tokens = self.cls_token.expand(B, -1, -1)
+        feat = torch.cat((cls_tokens, a), dim=1)
+
+        mask_cls = self.mask_cls.expand(B, -1)
+        mask = torch.cat((mask_cls, m), dim=1)
+
+        feat = self.encoder(feat, mask)
+        out = self.head(feat[:, 0])
+        return out
+

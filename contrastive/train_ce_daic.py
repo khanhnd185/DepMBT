@@ -146,9 +146,9 @@ def main():
 
     with open('daic.pickle', 'rb') as handle:
         dataset = pickle.load(handle)
-    trainset = DAICWOZ(dataset, args.datadir + 'train.csv')
-    validset  = DAICWOZ(dataset, args.datadir + 'dev.csv', is_train=False)
-    testset  = DAICWOZ(dataset, args.datadir + 'test.csv', is_train=False)
+    trainset = DAICWOZ(dataset, args.datadir + 'train.csv', is_train=True, maxlen=768)
+    validset = DAICWOZ(dataset, args.datadir + 'dev.csv', is_train=False, maxlen=768)
+    testset = DAICWOZ(dataset, args.datadir + 'test.csv', is_train=False, maxlen=768)
     trainldr = DataLoader(trainset, batch_size=args.batch, collate_fn=collate_fn, shuffle=True, num_workers=0)
     validldr = DataLoader(validset, batch_size=args.batch, collate_fn=collate_fn, shuffle=False, num_workers=0)
 
