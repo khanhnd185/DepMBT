@@ -1,5 +1,6 @@
 from copy import deepcopy
 import os
+import pickle
 import argparse
 from tqdm import tqdm
 
@@ -10,7 +11,7 @@ from sklearn.metrics import recall_score, precision_score, accuracy_score, confu
 
 from utils import *
 from eatd import EATD
-from model import CEMBT
+from model import CEMBT, CrossAttention
 
 def train(net, trainldr, optimizer, epoch, epochs, learning_rate, criteria):
     total_losses = AverageMeter()
@@ -85,9 +86,9 @@ def val(net, validldr, criteria):
     all_labels = all_labels.cpu().numpy()
     all_labels, all_y = transform(all_labels, all_y)
 
-    f1 = f1_score(all_labels, all_y, average='weighted')
-    r = recall_score(all_labels, all_y, average='weighted')
-    p = precision_score(all_labels, all_y, average='weighted')
+    f1 = f1_score(all_labels, all_y)
+    r = recall_score(all_labels, all_y)
+    p = precision_score(all_labels, all_y)
     acc = accuracy_score(all_labels, all_y)
     cm = confusion_matrix(all_labels, all_y)
     return (total_losses.avg(), f1, r, p, acc, cm)
@@ -102,6 +103,7 @@ def main():
     parser.add_argument('--opt', '-o', default='adam', help='Optimizer')
     parser.add_argument('--epoch', '-e', type=int, default=10, help='Number of epoches')
     parser.add_argument('--lr', '-a', type=float, default=0.00001, help='Learning rate')
+    parser.add_argument('--loss', '-l', default='ce', help='Loss function')
     args = parser.parse_args()
     output_dir = 'EATD{}'.format(str(args.config))
 
@@ -120,8 +122,13 @@ def main():
         train_indexes.append(train_index)
         test_indexes.append(test_index)
 
-    train_criteria = nn.CrossEntropyLoss()
-    valid_criteria = nn.CrossEntropyLoss()
+    if args.loss == 'focal':
+        train_criteria = FocalLoss(gamma=1.0)
+        valid_criteria = FocalLoss(gamma=1.0)
+    else:
+        train_criteria = nn.CrossEntropyLoss()
+        valid_criteria = nn.CrossEntropyLoss()
+
     df = create_new_df()
     df['fold'] = []
 
@@ -131,7 +138,7 @@ def main():
     train_dataset = []
     train_dataldr = []
     train_permulation = [1,2,3,4,5]
-    test_permulation = []
+    test_permulation = [1,2,4,5]
     for fold in range(3):
         train_dataset.append(EATD(x_audio, x_text, y_text, train_indexes[fold], train_permulation))
         train_dataldr.append(DataLoader(train_dataset[fold], batch_size=16, shuffle=True, num_workers=0))
@@ -148,7 +155,7 @@ def main():
     save_recall = [0.0] * 3
 
     for f in range(3):
-        net = CEMBT(1024, 256 , 1024, head='mlp')
+        net = CEMBT(1024, 256 , 128, head='mlp', bottle_layer=1, num_layers=4)
         net = net.cuda()
 
         if args.opt == 'SGD':
@@ -178,6 +185,10 @@ def main():
 
     for f in range(3):
         print("Fold {} best f1-precision-recall: {:.5f},{:.5f},{:.5f}".format(f, best_f1[f], save_precision[f], save_recall[f]))
+    
+    
+    with open(os.path.join('results', output_dir, 'train_indexes.pickle'), 'wb') as handle:
+        pickle.dump(train_indexes, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 if __name__=="__main__":
     main()
