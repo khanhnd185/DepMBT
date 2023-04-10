@@ -49,6 +49,10 @@ def get_dataset():
     with open("./daic.pickle", 'wb') as handle:
         pickle.dump(dataset, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
+def trim(a, v):
+    leng = min(a.shape[0], v.shape[0])
+    return a[:leng, :], v[:leng, :]
+
 
 class DAICWOZ(Dataset):
     def __init__(self, dataset, filename, is_train=True, maxlen=1024):
@@ -86,6 +90,62 @@ class DAICWOZ(Dataset):
                 
         
         self.length = [d[0].shape[0] for d in self.dataset]
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        return self.dataset[idx][0], self.dataset[idx][1], self.dataset[idx][2], self.length[idx]
+
+class MultiviewDAICWOZ(Dataset):
+    def __init__(self, dataset, filename, is_train=True, maxlen=1024):
+        super(MultiviewDAICWOZ, self).__init__()
+        self.dataset = []
+        with open(filename, 'r', encoding='utf-8') as f:
+            lines = f.readlines()[1:]
+
+        for line in (lines):
+            sample, label = line.strip().split(',')[:2]
+            label = int(label)
+            
+            if is_train == False:
+                a = dataset[sample][1][0::30, :]
+                v = dataset[sample][0][0::30, :]
+                a = a[-maxlen:,:]
+                v = v[-maxlen:,:]
+                self.dataset.append((a, v, label))
+                continue
+
+            audio, video = [], []
+            if label == 0:
+                for j in range(11):
+                    a = dataset[sample][1][j::30, :]
+                    v = dataset[sample][0][j::30, :]
+                    a = a[-maxlen:,:]
+                    v = v[-maxlen:,:]
+                    audio.append(a)
+                    video.append(v)
+                    if (j % 2) == 1:
+                        audio = trim(audio[0], audio[1])
+                        video = trim(video[0], video[1])
+                        self.dataset.append((audio, video, label))
+                        audio, video = [], []
+            else:
+                for j in range(30):
+                    a = dataset[sample][1][j::30, :]
+                    v = dataset[sample][0][j::30, :]
+                    a = a[-maxlen:,:]
+                    v = v[-maxlen:,:]
+                    audio.append(a)
+                    video.append(v)
+                    if (j % 2) == 1:
+                        audio = trim(audio[0], audio[1])
+                        video = trim(video[0], video[1])
+                        self.dataset.append((audio, video, label))
+                        audio, video = [], []
+                
+        
+        self.length = [d[0][0].shape[0] for d in self.dataset]
 
     def __len__(self):
         return len(self.dataset)
