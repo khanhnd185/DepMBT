@@ -2,6 +2,7 @@ from copy import deepcopy
 import os
 import pickle
 import argparse
+from poplib import CR
 from tqdm import tqdm
 
 import numpy as np
@@ -11,7 +12,7 @@ from sklearn.metrics import recall_score, precision_score, accuracy_score, confu
 
 from utils import *
 from eatd import EATD
-from model import CEMBT, CrossAttention
+from model import CEMBT, CrossAttention, FullAttention
 
 def train(net, trainldr, optimizer, epoch, epochs, learning_rate, criteria):
     total_losses = AverageMeter()
@@ -21,7 +22,7 @@ def train(net, trainldr, optimizer, epoch, epochs, learning_rate, criteria):
     for batch_idx, data in enumerate(tqdm(trainldr)):
         feature_audio, feature_video, mask, labels = data
 
-        # adjust_learning_rate(optimizer, epoch, epochs, learning_rate, batch_idx, train_loader_len)
+        adjust_learning_rate(optimizer, epoch, epochs, learning_rate, batch_idx, train_loader_len)
         feature_audio = feature_audio.cuda()
         feature_video = feature_video.cuda()
         mask = mask.cuda()
@@ -99,10 +100,10 @@ def main():
     parser.add_argument('--datadir', '-d', default='../../../../Data/EATD-Corpus/', help='Data folder path')
     
     parser.add_argument('--config', '-c', type=int, default=7, help='Config number')
-    parser.add_argument('--batch', '-b', type=int, default=32, help='Batch size')
+    parser.add_argument('--batch', '-b', type=int, default=16, help='Batch size')
     parser.add_argument('--opt', '-o', default='adam', help='Optimizer')
     parser.add_argument('--epoch', '-e', type=int, default=10, help='Number of epoches')
-    parser.add_argument('--lr', '-a', type=float, default=0.00001, help='Learning rate')
+    parser.add_argument('--lr', '-a', type=float, default=0.0001, help='Learning rate')
     parser.add_argument('--loss', '-l', default='ce', help='Loss function')
     args = parser.parse_args()
     output_dir = 'EATD{}'.format(str(args.config))
@@ -138,7 +139,7 @@ def main():
     train_dataset = []
     train_dataldr = []
     train_permulation = [1,2,3,4,5]
-    test_permulation = [1,2,4,5]
+    test_permulation = [1,2,3]
     for fold in range(3):
         train_dataset.append(EATD(x_audio, x_text, y_text, train_indexes[fold], train_permulation))
         train_dataldr.append(DataLoader(train_dataset[fold], batch_size=16, shuffle=True, num_workers=0))
@@ -155,7 +156,7 @@ def main():
     save_recall = [0.0] * 3
 
     for f in range(3):
-        net = CEMBT(1024, 256 , 128, head='mlp', bottle_layer=1, num_layers=4)
+        net = CEMBT(1024, 256 , 64, head='linear', project_type='conv1d', feed_forward=64, num_layers=2)
         net = net.cuda()
 
         if args.opt == 'SGD':
