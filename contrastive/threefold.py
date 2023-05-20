@@ -99,12 +99,13 @@ def main():
     parser = argparse.ArgumentParser(description='Generate dataset')
     parser.add_argument('--datadir', '-d', default='../../../../Data/EATD-Corpus/', help='Data folder path')
     
+    parser.add_argument('--fold', default='results/EATD0/train_indexes.pickle', help='Config number')
     parser.add_argument('--config', '-c', type=int, default=7, help='Config number')
     parser.add_argument('--batch', '-b', type=int, default=16, help='Batch size')
     parser.add_argument('--opt', '-o', default='adam', help='Optimizer')
     parser.add_argument('--epoch', '-e', type=int, default=10, help='Number of epoches')
     parser.add_argument('--lr', '-a', type=float, default=0.0001, help='Learning rate')
-    parser.add_argument('--loss', '-l', default='ce', help='Loss function')
+    parser.add_argument('--loss', '-l', default='focal', help='Loss function')
     args = parser.parse_args()
     output_dir = 'EATD{}'.format(str(args.config))
 
@@ -116,12 +117,14 @@ def main():
     y_text_cls = y_text >= 53.0
     y_text_cls = y_text_cls.astype(int)
 
-    skf = StratifiedKFold(n_splits=3, shuffle=True)
-    train_indexes = []
-    test_indexes = []
-    for i, (train_index, test_index) in enumerate(skf.split(x_text, y_text_cls)):
-        train_indexes.append(train_index)
-        test_indexes.append(test_index)
+    test_indexes = [[], [], []]
+    with open(args.fold, 'rb') as handle:
+        train_indexes = pickle.load(handle)
+
+    for f in range(3):
+        for i in range(len(y_text)):
+            if i not in train_indexes[f]:
+                test_indexes[f].append(i)
 
     if args.loss == 'focal':
         train_criteria = FocalLoss(gamma=1.0)
@@ -156,7 +159,7 @@ def main():
     save_recall = [0.0] * 3
 
     for f in range(3):
-        net = CEMBT(1024, 256 , 64, head='linear', project_type='conv1d', feed_forward=64, num_layers=2)
+        net = CEMBT(1024, 256 , 32, head='mlp', project_type='conv1d', feed_forward=32, num_layers=4, num_bottle_token=1, drop=0.2)
         net = net.cuda()
 
         if args.opt == 'SGD':

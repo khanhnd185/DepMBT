@@ -27,7 +27,7 @@ class MBT(nn.Module):
         self.swap_dim = (project_type == 'conv1d' or project_type == 'tcn')
         
         self.audio_prj = get_projection(a_dim, embed_dim, project_type)
-        self.video_prj = get_projection(v_dim, embed_dim, project_type)
+        self.video_prj = get_projection(v_dim, embed_dim, 'minimal')
 
         layer = EncoderLayer(embed_dim, num_head, feed_forward, drop)
         self.video_layers = clones(layer, num_layers)
@@ -54,10 +54,10 @@ class MBT(nn.Module):
         B = a.shape[0]
         if self.swap_dim:
             a = self.audio_prj(a.transpose(1, 2)).transpose(1, 2)
-            v = self.video_prj(v.transpose(1, 2)).transpose(1, 2)
+            #v = self.video_prj(v.transpose(1, 2)).transpose(1, 2)
         else:
             a = self.audio_prj(a)
-            v = self.video_prj(v)
+        v = self.video_prj(v)
 
         
         acls_tokens = self.acls_token.expand(B, -1, -1)
