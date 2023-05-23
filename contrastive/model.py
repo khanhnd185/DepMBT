@@ -125,9 +125,9 @@ class CEMBT(nn.Module):
             self.head = nn.Linear(embed_dim, num_classes)
         elif head == 'mlp':
             self.head = nn.Sequential(
-                nn.Linear(embed_dim, embed_dim),
+                nn.Linear(embed_dim, 256),
                 nn.ReLU(inplace=True),
-                nn.Linear(embed_dim, num_classes)
+                nn.Linear(256, num_classes)
             )
         else:
             raise NotImplementedError(
